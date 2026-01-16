@@ -1419,7 +1419,7 @@ def main():
         st.stop()
 
     st.sidebar.markdown("---")
-    st.sidebar.markdown("### 📋 Data Info")
+    st.sidebar.markdown("### Data Info")
     st.sidebar.markdown(f"**Observations:** {len(df)}")
     st.sidebar.markdown(f"**Factors:** {', '.join(factor_cols)}")
     st.sidebar.markdown(f"**Response:** {value_col}")
@@ -1490,7 +1490,7 @@ def main():
                          use_container_width=True, hide_index=True)
 
             csv = summary.to_csv(index=False)
-            st.download_button("📥 Download Summary", csv,
+            st.download_button("Download Summary", csv,
                                "summary_statistics.csv", "text/csv")
 
         with tab3:
@@ -2117,4 +2117,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
