@@ -1,0 +1,23 @@
+# Core
+streamlit>=1.30
+pandas>=1.5
+numpy>=1.23
+
+# Visualization
+plotly>=5.15
+kaleido>=0.2.1
+
+# Statistics
+scipy>=1.10
+statsmodels>=0.14
+
+# HTML templating (report generation)
+jinja2>=3.1
+
+# Compatibility
+typing-extensions>=4.5
+
+# Optional (future CLD enhancement)
+scikit-posthocs>=0.7.0
+
+
