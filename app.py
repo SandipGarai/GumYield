@@ -76,17 +76,14 @@ COLOR_PALETTES = {
 MONTH_ORDER = ['January', 'February', 'March', 'April', 'May', 'June',
                'July', 'August', 'September', 'October', 'November', 'December']
 
-# Plotly config for SVG download
+# Plotly config for PNG download
 PLOTLY_CONFIG = {
     'toImageButtonOptions': {
-        'format': 'svg',
+        'format': 'png',     # ✅ PNG only
         'filename': 'figure',
-        'height': 600,
-        'width': 900,
-        'scale': 2
+        'scale': 2           # keep scale for quality (optional)
     },
     'displaylogo': False,
-    'modeBarButtonsToAdd': ['downloadImage'],
     'modeBarButtonsToRemove': ['lasso2d', 'select2d']
 }
 
@@ -1943,38 +1940,38 @@ def display_styled_table(df, title="", format_dict=None, highlight_col=None,
 
 
 def download_figure_as_svg(fig, filename, key):
-    """Add SVG download button for a Plotly figure"""
-    # Convert to SVG
-    svg_bytes = fig.to_image(format="svg")
+    """Add PNG download button for a Plotly figure"""
+    # Convert to PNG
+    png_bytes = fig.to_image(format="png")
 
     st.download_button(
-        label="Download SVG",
-        data=svg_bytes,
-        file_name=f"{filename}.svg",
-        mime="image/svg+xml",
+        label="Download PNG",
+        data=png_bytes,
+        file_name=f"{filename}.png",
+        mime="image/png",
         key=key
     )
 
 
 def display_figure_with_download(fig, filename, key_prefix):
-    """Display a Plotly figure with SVG download option"""
+    """Display a Plotly figure with PNG download option"""
     st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
 
-    # Try to add SVG download (requires kaleido)
+    # Try to add PNG download (requires kaleido)
     try:
-        svg_bytes = fig.to_image(format="svg")
+        png_bytes = fig.to_image(format="png")
         st.download_button(
-            label="📥 Download SVG",
-            data=svg_bytes,
-            file_name=f"{filename}.svg",
-            mime="image/svg+xml",
+            label="Download PNG",
+            data=png_bytes,
+            file_name=f"{filename}.png",
+            mime="image/png",
             key=f"{key_prefix}_{filename}"
         )
     except Exception as e:
         # Fallback to HTML download if kaleido not available
         html_str = fig.to_html(include_plotlyjs='cdn')
         st.download_button(
-            label="📥 Download HTML",
+            label="Download HTML",
             data=html_str,
             file_name=f"{filename}.html",
             mime="text/html",
@@ -3509,7 +3506,7 @@ def main():
     <small>
     <b>Download Options:</b><br>
     • Tables: Click "Download CSV" below each table<br>
-    • Figures: Click camera icon (📷) in figure toolbar → SVG<br>
+    • Figures: Click camera icon (📷) in figure toolbar → PNG<br>
     </small>
     """,
         unsafe_allow_html=True
