@@ -1,5 +1,5 @@
 """
-Agricultural Experiment Statistical Analysis Application v2.1
+Agricultural Experiment Statistical Analysis Application v2.2
 =============================================================
 Comprehensive Streamlit application for analyzing factorial agricultural experiments.
 
@@ -7,13 +7,14 @@ Features:
 - Data Summary with extended statistics (Skewness, Kurtosis, CV%)
 - Publication-ready visualizations with proper hover labels
 - ANOVA with assumption testing and data transformation options
-- Welch's ANOVA for heterogeneous variances
+- Welch's ANOVA for heterogeneous variances with Games-Howell post-hoc
+- Two-way ANOVA with interaction analysis and bar charts
 - Post-hoc Analysis with correct CLD significance letters
 - Non-parametric alternatives (Kruskal-Wallis, Friedman, Dunn's test)
 - HTML Report Generation
 
 Author: Statistical Analysis Tool
-Version: 2.1
+Version: 2.2
 """
 
 import streamlit as st
@@ -24,7 +25,7 @@ import plotly.express as px
 from plotly.subplots import make_subplots
 from scipy import stats
 from scipy.stats import shapiro, levene, kruskal, f_oneway, friedmanchisquare
-from scipy.stats import boxcox, skew, kurtosis, rankdata, norm
+from scipy.stats import boxcox, skew, kurtosis, rankdata, norm, t as t_dist
 from scipy.special import inv_boxcox
 from itertools import combinations
 from io import BytesIO, StringIO
@@ -271,6 +272,10 @@ def perform_anova(df, factor_col, value_col):
     # Effect size (eta-squared)
     eta_squared = ss_between / ss_total if ss_total > 0 else 0
 
+    # Omega-squared (less biased estimate)
+    omega_squared = (ss_between - (k - 1) * ms_within) / (ss_total + ms_within)
+    omega_squared = max(0, omega_squared)  # Ensure non-negative
+
     # SEm (Standard Error of Mean) - pooled
     sem = np.sqrt(ms_within / (n_total / k))
 
@@ -289,16 +294,21 @@ def perform_anova(df, factor_col, value_col):
 
     additional_stats = {
         'eta_squared': eta_squared,
+        'omega_squared': omega_squared,
         'sem': sem,
         'cd': cd,
-        'grand_mean': grand_mean
+        'grand_mean': grand_mean,
+        'ms_within': ms_within,
+        'df_within': df_within,
+        'k': k,
+        'n_total': n_total
     }
 
     return f_stat, p_value, anova_table, additional_stats
 
 
 def perform_welch_anova(df, factor_col, value_col):
-    """Welch's ANOVA for heterogeneous variances"""
+    """Welch's ANOVA for heterogeneous variances with additional statistics"""
     from scipy.stats import f as f_dist
 
     groups_data = {name: group[value_col].dropna().values
@@ -307,7 +317,7 @@ def perform_welch_anova(df, factor_col, value_col):
     group_names = list(groups_data.keys())
 
     if len(groups) < 2:
-        return None, None, None
+        return None, None, None, None
 
     # Calculate group statistics
     n = np.array([len(g) for g in groups])
@@ -337,6 +347,22 @@ def perform_welch_anova(df, factor_col, value_col):
     # p-value
     p_value = 1 - f_dist.cdf(f_stat, df1, df2)
 
+    # Effect size (omega-squared for Welch's ANOVA)
+    # Using adjusted formula for unequal variances
+    n_total = sum(n)
+    grand_mean = np.mean(df[value_col].dropna())
+
+    # Estimated omega-squared
+    ss_between = np.sum(n * (means - grand_mean)**2)
+    ss_total = np.sum((df[value_col].dropna() - grand_mean)**2)
+    ms_within_pooled = np.mean(variances)  # Approximate
+
+    omega_squared = (ss_between - (k - 1) * ms_within_pooled) / \
+        (ss_total + ms_within_pooled)
+    omega_squared = max(0, omega_squared)
+
+    eta_squared = ss_between / ss_total if ss_total > 0 else 0
+
     welch_table = {
         'Source': ['Between Groups (Welch)', 'Residual'],
         'df': [df1, df2],
@@ -344,11 +370,108 @@ def perform_welch_anova(df, factor_col, value_col):
         'p-value': [p_value, np.nan]
     }
 
-    return f_stat, p_value, welch_table
+    additional_stats = {
+        'eta_squared': eta_squared,
+        'omega_squared': omega_squared,
+        'grand_mean': grand_mean,
+        'k': k,
+        'n_total': n_total,
+        'group_means': dict(zip(group_names, means)),
+        'group_variances': dict(zip(group_names, variances)),
+        'group_ns': dict(zip(group_names, n))
+    }
+
+    return f_stat, p_value, welch_table, additional_stats
+
+
+def perform_games_howell(df, factor_col, value_col):
+    """
+    Games-Howell post-hoc test for unequal variances.
+    Appropriate for use after Welch's ANOVA.
+    """
+    groups = sorted(df[factor_col].unique())
+    n_groups = len(groups)
+
+    # Calculate group statistics
+    group_stats = {}
+    for g in groups:
+        g_data = df[df[factor_col] == g][value_col].dropna()
+        group_stats[g] = {
+            'mean': g_data.mean(),
+            'var': g_data.var(ddof=1),
+            'n': len(g_data),
+            'se': np.sqrt(g_data.var(ddof=1) / len(g_data))
+        }
+
+    results = []
+
+    for g1, g2 in combinations(groups, 2):
+        n1 = group_stats[g1]['n']
+        n2 = group_stats[g2]['n']
+        m1 = group_stats[g1]['mean']
+        m2 = group_stats[g2]['mean']
+        v1 = group_stats[g1]['var']
+        v2 = group_stats[g2]['var']
+
+        # Mean difference
+        mean_diff = m1 - m2
+
+        # Standard error of the difference
+        se_diff = np.sqrt(v1/n1 + v2/n2)
+
+        # Welch-Satterthwaite degrees of freedom
+        num = (v1/n1 + v2/n2)**2
+        denom = (v1/n1)**2 / (n1 - 1) + (v2/n2)**2 / (n2 - 1)
+        df_gh = num / denom
+
+        # t-statistic
+        t_stat = mean_diff / se_diff
+
+        # Critical value from studentized range distribution
+        # Using approximation with t-distribution for confidence intervals
+        q_crit = stats.t.ppf(0.975, df_gh)
+
+        # p-value (two-tailed)
+        p_value = 2 * (1 - stats.t.cdf(abs(t_stat), df_gh))
+
+        # Bonferroni-like adjustment for multiple comparisons
+        # Using the number of comparisons
+        n_comparisons = n_groups * (n_groups - 1) / 2
+        p_adj = min(p_value * n_comparisons, 1.0)
+
+        # Confidence interval
+        margin = q_crit * se_diff
+        lower_ci = mean_diff - margin
+        upper_ci = mean_diff + margin
+
+        results.append({
+            'Group1': g1,
+            'Group2': g2,
+            'Mean Diff': mean_diff,
+            'SE': se_diff,
+            'df': df_gh,
+            't-stat': t_stat,
+            'p-adj': p_adj,
+            'Lower CI': lower_ci,
+            'Upper CI': upper_ci,
+            'Significant': p_adj < 0.05
+        })
+
+    results_df = pd.DataFrame(results)
+
+    # Calculate group means for ordering
+    group_means = df.groupby(factor_col)[
+        value_col].mean().sort_values(ascending=False)
+    sorted_groups = list(group_means.index)
+
+    # Generate significance letters
+    letters = assign_cld_letters(results_df, sorted_groups)
+
+    return results_df, letters
 
 
 def perform_two_way_anova(df, factor1, factor2, value_col):
-    """Two-way ANOVA using statsmodels"""
+    """Two-way ANOVA using statsmodels with additional statistics"""
     try:
         import statsmodels.api as sm
         from statsmodels.formula.api import ols
@@ -369,9 +492,53 @@ def perform_two_way_anova(df, factor1, factor2, value_col):
             'C(Factor2)', factor2)
         anova_table.index = anova_table.index.str.replace(':', ' × ')
 
-        return anova_table, model
+        # Calculate additional statistics
+        ss_total = anova_table['sum_sq'].sum()
+        n_total = len(df_clean['Response'].dropna())
+        grand_mean = df_clean['Response'].mean()
+
+        # Effect sizes for each factor
+        effect_sizes = {}
+        for idx in anova_table.index:
+            if idx != 'Residual':
+                eta_sq = anova_table.loc[idx, 'sum_sq'] / ss_total
+                # Partial eta-squared
+                partial_eta_sq = anova_table.loc[idx, 'sum_sq'] / (
+                    anova_table.loc[idx, 'sum_sq'] + anova_table.loc['Residual', 'sum_sq'])
+                effect_sizes[idx] = {
+                    'eta_squared': eta_sq,
+                    'partial_eta_squared': partial_eta_sq
+                }
+
+        # MSE and related statistics
+        ms_error = anova_table.loc['Residual',
+                                   'sum_sq'] / anova_table.loc['Residual', 'df']
+        df_error = anova_table.loc['Residual', 'df']
+
+        # SEm for main effects
+        n_per_cell = n_total / \
+            (df_clean['Factor1'].nunique() * df_clean['Factor2'].nunique())
+        sem = np.sqrt(ms_error / n_per_cell)
+
+        # CD (Critical Difference) at 5%
+        t_crit = stats.t.ppf(0.975, df_error)
+        cd = t_crit * sem * np.sqrt(2)
+
+        additional_stats = {
+            'effect_sizes': effect_sizes,
+            'ms_error': ms_error,
+            'df_error': df_error,
+            'sem': sem,
+            'cd': cd,
+            'grand_mean': grand_mean,
+            'n_total': n_total,
+            'r_squared': model.rsquared,
+            'adj_r_squared': model.rsquared_adj
+        }
+
+        return anova_table, model, additional_stats
     except Exception as e:
-        return None, str(e)
+        return None, str(e), None
 
 
 def perform_kruskal_wallis(df, factor_col, value_col):
@@ -402,6 +569,75 @@ def perform_friedman_test(df, factor_col, block_col, value_col):
         return stat, p_value, None
     except Exception as e:
         return None, None, str(e)
+
+
+def perform_nemenyi_test(df, factor_col, block_col, value_col):
+    """
+    Nemenyi post-hoc test for Friedman test.
+    Compares all pairs of groups using rank-based approach.
+    """
+    try:
+        # Create pivot table
+        pivot_df = df.pivot_table(
+            values=value_col, index=block_col, columns=factor_col, aggfunc='mean')
+        pivot_df = pivot_df.dropna()
+
+        n = pivot_df.shape[0]  # number of blocks
+        k = pivot_df.shape[1]  # number of treatments
+        groups = list(pivot_df.columns)
+
+        # Rank within each block (row)
+        ranks_df = pivot_df.rank(axis=1)
+
+        # Calculate mean ranks for each treatment
+        mean_ranks = ranks_df.mean()
+
+        # Critical difference for Nemenyi test
+        # q_alpha values for alpha=0.05 (studentized range / sqrt(2))
+        # Approximation using standard formula
+        q_alpha = stats.studentized_range.ppf(0.95, k, np.inf) / np.sqrt(2)
+
+        # CD = q_alpha * sqrt(k*(k+1)/(6*n))
+        cd = q_alpha * np.sqrt(k * (k + 1) / (6 * n))
+
+        # Pairwise comparisons
+        results = []
+        for g1, g2 in combinations(groups, 2):
+            diff = abs(mean_ranks[g1] - mean_ranks[g2])
+            significant = diff > cd
+
+            # Calculate approximate p-value using normal approximation
+            se = np.sqrt(k * (k + 1) / (6 * n))
+            z = diff / se
+            p_value = 2 * (1 - norm.cdf(z))
+            p_adj = min(p_value * (k * (k - 1) / 2), 1.0)
+
+            results.append({
+                'Group1': g1,
+                'Group2': g2,
+                'Mean Rank 1': mean_ranks[g1],
+                'Mean Rank 2': mean_ranks[g2],
+                'Rank Diff': diff,
+                'CD': cd,
+                'p-adj': p_adj,
+                'Significant': significant
+            })
+
+        results_df = pd.DataFrame(results)
+
+        # Generate CLD letters
+        sorted_groups = list(mean_ranks.sort_values().index)
+        letters = assign_cld_letters(results_df, sorted_groups)
+
+        # Additional info
+        rank_summary = pd.DataFrame({
+            'Group': groups,
+            'Mean Rank': [mean_ranks[g] for g in groups]
+        }).sort_values('Mean Rank')
+
+        return results_df, letters, cd, rank_summary
+    except Exception as e:
+        return None, None, None, None
 
 
 def perform_dunn_test(df, factor_col, value_col):
@@ -594,6 +830,8 @@ def perform_two_way_posthoc(df, factor1, factor2, value_col):
     tukey_df, _, letters = perform_tukey_hsd(df_temp, 'Interaction', value_col)
     if tukey_df is not None:
         results['Interaction'] = {'tukey': tukey_df, 'letters': letters}
+        # Store the dataframe for bar chart
+        results['Interaction']['df'] = df_temp
 
     return results
 
@@ -934,8 +1172,8 @@ def plot_heatmap(df, factor1, factor2, value_col):
     return fig
 
 
-def plot_tukey_heatmap(tukey_df, groups, title="Tukey HSD Pairwise Comparisons"):
-    """Create heatmap for Tukey HSD results with significance stars"""
+def plot_tukey_heatmap(tukey_df, groups, title="Tukey HSD Pairwise Comparisons", lower_triangular=True):
+    """Create heatmap for post-hoc results - color shows mean diff, stars show significance"""
     n = len(groups)
 
     # Create matrices for p-values and mean differences
@@ -959,38 +1197,65 @@ def plot_tukey_heatmap(tukey_df, groups, title="Tukey HSD Pairwise Comparisons")
             upper_ci[i, j] = row['Upper CI']
             upper_ci[j, i] = -row['Lower CI']
 
-    # Create significance annotations
+    # Create lower triangular mask for display
+    if lower_triangular:
+        mask = np.triu(np.ones_like(diff_matrix, dtype=bool), k=0)
+        diff_matrix_display = np.where(mask, np.nan, diff_matrix)
+    else:
+        diff_matrix_display = diff_matrix.copy()
+        for i in range(n):
+            diff_matrix_display[i, i] = np.nan
+
+    # Get color range (symmetric around 0)
+    max_abs_diff = np.nanmax(np.abs(diff_matrix_display))
+    if max_abs_diff == 0:
+        max_abs_diff = 1
+
+    # Create significance annotations (only for lower triangle)
     annotations = []
     for i in range(n):
         for j in range(n):
-            if i != j:
-                p = p_matrix[i, j]
-                if p < 0.001:
-                    star = "***"
-                elif p < 0.01:
-                    star = "**"
-                elif p < 0.05:
-                    star = "*"
-                else:
-                    star = "ns"
+            if lower_triangular:
+                if i <= j:
+                    continue
+            else:
+                if i == j:
+                    continue
 
-                annotations.append(dict(
-                    x=groups[j],
-                    y=groups[i],
-                    text=star,
-                    showarrow=False,
-                    font=dict(size=12, color='white' if p < 0.05 else 'black',
-                              family='Arial', weight='bold'),
-                    xanchor='center',
-                    yanchor='middle'
-                ))
+            p = p_matrix[i, j]
+            diff_val = diff_matrix[i, j]
+            if p < 0.001:
+                star = "***"
+            elif p < 0.01:
+                star = "**"
+            elif p < 0.05:
+                star = "*"
+            else:
+                star = "ns"
+
+            # Choose text color based on background intensity
+            text_color = 'white' if abs(
+                diff_val) > max_abs_diff * 0.5 else 'black'
+
+            annotations.append(dict(
+                x=groups[j],
+                y=groups[i],
+                text=star,
+                showarrow=False,
+                font=dict(size=12, color=text_color,
+                          family='Arial', weight='bold'),
+                xanchor='center',
+                yanchor='middle'
+            ))
 
     # Create custom hover text
     hover_text = []
     for i in range(n):
         row_text = []
         for j in range(n):
-            if i == j:
+            if lower_triangular and i <= j:
+                row_text.append("")
+            elif i == j:
                 row_text.append(f"{groups[i]}")
             else:
                 text = (f"<b>{groups[i]} vs {groups[j]}</b><br>"
@@ -1000,21 +1265,22 @@ def plot_tukey_heatmap(tukey_df, groups, title="Tukey HSD Pairwise Comparisons")
                 row_text.append(text)
         hover_text.append(row_text)
 
+    # Use diverging colorscale (blue-white-red) for mean differences
     fig = go.Figure(data=go.Heatmap(
-        z=p_matrix,
+        z=diff_matrix_display,
         x=groups,
         y=groups,
-        colorscale=[[0, '#d62728'], [0.05, '#ff7f0e'],
-                    [0.1, '#ffbb78'], [1, '#2ca02c']],
-        zmin=0,
-        zmax=1,
+        colorscale='RdBu_r',  # Red for positive, Blue for negative
+        zmid=0,  # Center at 0
+        zmin=-max_abs_diff,
+        zmax=max_abs_diff,
         colorbar=dict(
-            title=dict(text='p-value', font=dict(size=13, color='black')),
+            title=dict(text='Mean<br>Difference',
+                       font=dict(size=12, color='black')),
             tickfont=dict(size=11, color='black'),
-            tickvals=[0, 0.01, 0.05, 0.1, 0.5, 1],
-            ticktext=['0', '0.01', '0.05', '0.10', '0.50', '1.00'],
             thickness=18,
             len=0.9,
+            x=1.02,
         ),
         hovertemplate='%{customdata}<extra></extra>',
         customdata=hover_text,
@@ -1029,26 +1295,28 @@ def plot_tukey_heatmap(tukey_df, groups, title="Tukey HSD Pairwise Comparisons")
         xaxis_title="Group",
         yaxis_title="Group",
         show_legend=False,
-        height=500,
-        width=600
+        height=550,
+        width=750
     )
 
     fig.update_xaxes(tickangle=0, side='bottom')
     fig.update_yaxes(autorange='reversed')
 
-    # Add legend for stars
+    # Add legend for significance stars
     fig.add_annotation(
-        x=1.25, y=0.5,
+        x=1.18, y=0.5,
         xref='paper', yref='paper',
         text="<b>Significance:</b><br>*** p<0.001<br>** p<0.01<br>* p<0.05<br>ns: not sig.",
         showarrow=False,
-        font=dict(size=10, color='black'),
+        font=dict(size=11, color='black'),
         align='left',
-        bgcolor='rgba(255,255,255,0.9)',
+        bgcolor='rgba(255,255,255,0.95)',
         bordercolor='black',
         borderwidth=1,
-        borderpad=5
+        borderpad=8
     )
+
+    fig.update_layout(margin=dict(r=200))
 
     return fig
 
@@ -1154,6 +1422,198 @@ def plot_distribution_histogram(df, value_col, factor_col=None):
             yaxis_title="Frequency",
             show_legend=False
         )
+
+    return fig
+
+
+def create_styled_table(df, title="", highlight_col=None, highlight_condition=None,
+                        format_dict=None, height=400):
+    """Create a publication-quality styled table using Plotly"""
+
+    # Prepare data
+    if format_dict:
+        display_df = df.copy()
+        for col, fmt in format_dict.items():
+            if col in display_df.columns:
+                display_df[col] = display_df[col].apply(
+                    lambda x: fmt.format(x) if pd.notna(
+                        x) and isinstance(x, (int, float)) else x
+                )
+    else:
+        display_df = df.copy()
+
+    # Define colors
+    header_color = '#1f77b4'
+    row_even_color = '#f9f9f9'
+    row_odd_color = 'white'
+    highlight_color = '#d4edda'
+
+    # Create cell colors based on highlighting
+    n_rows = len(display_df)
+    n_cols = len(display_df.columns)
+
+    cell_colors = []
+    for j in range(n_cols):
+        col_colors = []
+        col_name = display_df.columns[j]
+        for i in range(n_rows):
+            base_color = row_even_color if i % 2 == 0 else row_odd_color
+
+            # Apply highlight if condition met
+            if highlight_col and highlight_condition and col_name == highlight_col:
+                try:
+                    val = df.iloc[i][highlight_col]
+                    if highlight_condition(val):
+                        base_color = highlight_color
+                except:
+                    pass
+            # Also highlight entire row if Significant column exists and is True
+            if 'Significant' in df.columns:
+                try:
+                    if df.iloc[i]['Significant']:
+                        base_color = highlight_color
+                except:
+                    pass
+
+            col_colors.append(base_color)
+        cell_colors.append(col_colors)
+
+    fig = go.Figure(data=[go.Table(
+        header=dict(
+            values=[f'<b>{col}</b>' for col in display_df.columns],
+            fill_color=header_color,
+            align='center',
+            font=dict(color='white', size=13, family='Arial'),
+            height=35
+        ),
+        cells=dict(
+            values=[display_df[col].tolist() for col in display_df.columns],
+            fill_color=cell_colors,
+            align='center',
+            font=dict(color='black', size=12, family='Arial'),
+            height=30
+        )
+    )])
+
+    fig.update_layout(
+        title=dict(
+            text=f'<b>{title}</b>' if title else '',
+            font=dict(size=16, family='Arial', color='black'),
+            x=0.5,
+            xanchor='center'
+        ),
+        margin=dict(l=20, r=20, t=60 if title else 20, b=20),
+        height=height,
+        paper_bgcolor='white'
+    )
+
+    return fig
+
+
+def plot_nemenyi_heatmap(results_df, groups, cd, title="Nemenyi Post-hoc Test"):
+    """Create heatmap for Nemenyi test results"""
+    n = len(groups)
+
+    # Create matrices
+    diff_matrix = np.zeros((n, n))
+    p_matrix = np.ones((n, n))
+
+    group_to_idx = {g: i for i, g in enumerate(groups)}
+
+    for _, row in results_df.iterrows():
+        i = group_to_idx.get(row['Group1'])
+        j = group_to_idx.get(row['Group2'])
+        if i is not None and j is not None:
+            diff_matrix[i, j] = row['Rank Diff']
+            diff_matrix[j, i] = row['Rank Diff']
+            p_matrix[i, j] = row['p-adj']
+            p_matrix[j, i] = row['p-adj']
+
+    # Lower triangular
+    mask = np.triu(np.ones_like(diff_matrix, dtype=bool), k=0)
+    diff_matrix_display = np.where(mask, np.nan, diff_matrix)
+
+    max_diff = np.nanmax(diff_matrix_display) if np.nanmax(
+        diff_matrix_display) > 0 else 1
+
+    # Annotations
+    annotations = []
+    for i in range(n):
+        for j in range(n):
+            if i <= j:
+                continue
+
+            diff = diff_matrix[i, j]
+            sig = diff > cd
+            star = "**" if sig else "ns"
+            text_color = 'white' if diff > max_diff * 0.5 else 'black'
+
+            annotations.append(dict(
+                x=groups[j], y=groups[i], text=star,
+                showarrow=False,
+                font=dict(size=12, color=text_color,
+                          family='Arial', weight='bold'),
+                xanchor='center', yanchor='middle'
+            ))
+
+    # Hover text
+    hover_text = []
+    for i in range(n):
+        row_text = []
+        for j in range(n):
+            if i <= j:
+                row_text.append("")
+            else:
+                text = (f"<b>{groups[i]} vs {groups[j]}</b><br>"
+                        f"Rank Diff: {diff_matrix[i, j]:.3f}<br>"
+                        f"CD: {cd:.3f}<br>"
+                        f"Significant: {'Yes' if diff_matrix[i, j] > cd else 'No'}")
+                row_text.append(text)
+        hover_text.append(row_text)
+
+    fig = go.Figure(data=go.Heatmap(
+        z=diff_matrix_display,
+        x=groups,
+        y=groups,
+        colorscale='YlOrRd',
+        zmin=0,
+        zmax=max_diff,
+        colorbar=dict(
+            title=dict(text='Rank<br>Difference',
+                       font=dict(size=12, color='black')),
+            tickfont=dict(size=11, color='black'),
+            thickness=18,
+            len=0.9,
+            x=1.02,
+        ),
+        hovertemplate='%{customdata}<extra></extra>',
+        customdata=hover_text,
+        showscale=True,
+    ))
+
+    # Add CD line annotation
+    fig.add_annotation(
+        x=1.18, y=0.5,
+        xref='paper', yref='paper',
+        text=f"<b>CD = {cd:.3f}</b><br>** sig. diff.<br>ns: not sig.",
+        showarrow=False,
+        font=dict(size=11, color='black'),
+        align='left',
+        bgcolor='rgba(255,255,255,0.95)',
+        bordercolor='black',
+        borderwidth=1,
+        borderpad=8
+    )
+
+    fig.update_layout(annotations=annotations)
+
+    fig = create_publication_layout(
+        fig, title=title, xaxis_title="Group", yaxis_title="Group",
+        show_legend=False, height=550, width=750
+    )
+    fig.update_xaxes(tickangle=0, side='bottom')
+    fig.update_yaxes(autorange='reversed')
+    fig.update_layout(margin=dict(r=200))
 
     return fig
 
@@ -1345,7 +1805,7 @@ def generate_html_report(df, factor_cols, value_col, analyses_results):
         </div>
         
         <div class="footer">
-            <p>Generated by Agricultural Experiment Statistical Analysis Tool v2.1</p>
+            <p>Generated by Agricultural Experiment Statistical Analysis Tool v2.2</p>
         </div>
     </body>
     </html>
@@ -1750,11 +2210,18 @@ def main():
                     # Additional statistics
                     st.markdown("### Additional Statistics")
                     col1, col2, col3, col4 = st.columns(4)
-                    col1.metric("Effect Size (η²)",
+                    col1.metric("η² (Eta-squared)",
                                 f"{add_stats['eta_squared']:.4f}")
-                    col2.metric("SEm", f"{add_stats['sem']:.4f}")
-                    col3.metric("CD (5%)", f"{add_stats['cd']:.4f}")
-                    col4.metric("Grand Mean", f"{add_stats['grand_mean']:.4f}")
+                    col2.metric("ω² (Omega-squared)",
+                                f"{add_stats['omega_squared']:.4f}")
+                    col3.metric("SEm", f"{add_stats['sem']:.4f}")
+                    col4.metric("CD (5%)", f"{add_stats['cd']:.4f}")
+
+                    col5, col6, col7, col8 = st.columns(4)
+                    col5.metric("Grand Mean", f"{add_stats['grand_mean']:.4f}")
+                    col6.metric("MSE", f"{add_stats['ms_within']:.4f}")
+                    col7.metric("df (Error)", f"{add_stats['df_within']:.0f}")
+                    col8.metric("k (Groups)", f"{add_stats['k']:.0f}")
 
                     if p_value < 0.05:
                         st.success(
@@ -1767,10 +2234,11 @@ def main():
                             working_df, factor, working_value_col)
 
                         if tukey_df is not None:
-                            # Heatmap visualization
+                            # Heatmap visualization (lower triangular)
                             st.markdown("#### Pairwise Comparison Heatmap")
                             groups = sorted(working_df[factor].unique())
-                            fig_heatmap = plot_tukey_heatmap(tukey_df, groups)
+                            fig_heatmap = plot_tukey_heatmap(
+                                tukey_df, groups, lower_triangular=True)
                             st.plotly_chart(
                                 fig_heatmap, use_container_width=True)
 
@@ -1790,8 +2258,14 @@ def main():
                                         g, '')}
                                     for g in group_means.index
                                 ])
-                                st.dataframe(letters_df.style.format({'Mean': '{:.3f}'}),
-                                             use_container_width=True, hide_index=True)
+                                fig_letters = create_styled_table(
+                                    letters_df,
+                                    title="Compact Letter Display",
+                                    format_dict={'Mean': '{:.3f}'},
+                                    height=min(150 + len(letters_df) * 35, 400)
+                                )
+                                st.plotly_chart(
+                                    fig_letters, use_container_width=True)
 
                                 st.markdown(
                                     "### Bar Chart with Significance Letters")
@@ -1810,7 +2284,7 @@ def main():
 
                 factor = st.selectbox("Select Factor:", factor_cols)
 
-                f_stat, p_value, welch_table = perform_welch_anova(
+                f_stat, p_value, welch_table, add_stats = perform_welch_anova(
                     working_df, factor, working_value_col)
 
                 if f_stat is not None:
@@ -1824,6 +2298,28 @@ def main():
                     col1.metric("Welch's F", f"{f_stat:.4f}")
                     col2.metric("p-value", f"{p_value:.6f}")
 
+                    # Additional Statistics for Welch's ANOVA
+                    st.markdown("### Additional Statistics")
+                    col1, col2, col3, col4 = st.columns(4)
+                    col1.metric("η² (Eta-squared)",
+                                f"{add_stats['eta_squared']:.4f}")
+                    col2.metric("ω² (Omega-squared)",
+                                f"{add_stats['omega_squared']:.4f}")
+                    col3.metric("Grand Mean", f"{add_stats['grand_mean']:.4f}")
+                    col4.metric("k (Groups)", f"{add_stats['k']:.0f}")
+
+                    # Group-wise statistics
+                    st.markdown("#### Group Statistics")
+                    group_stats_df = pd.DataFrame({
+                        'Group': list(add_stats['group_means'].keys()),
+                        'Mean': list(add_stats['group_means'].values()),
+                        'Variance': list(add_stats['group_variances'].values()),
+                        'n': list(add_stats['group_ns'].values())
+                    })
+                    st.dataframe(group_stats_df.style.format({
+                        'Mean': '{:.4f}', 'Variance': '{:.4f}', 'n': '{:.0f}'
+                    }), use_container_width=True, hide_index=True)
+
                     if p_value < 0.05:
                         st.success(
                             f"**Significant effect** of {factor} (p < 0.05)")
@@ -1831,21 +2327,59 @@ def main():
                         st.markdown("---")
                         st.markdown("### Post-hoc Analysis (Games-Howell)")
                         st.info(
-                            "For Welch's ANOVA, Games-Howell test is recommended. Using Tukey HSD as approximation.")
+                            "Games-Howell test is the appropriate post-hoc test for Welch's ANOVA as it does not assume equal variances.")
 
-                        tukey_df, tukey_result, letters = perform_tukey_hsd(
+                        gh_df, letters = perform_games_howell(
                             working_df, factor, working_value_col)
 
-                        if tukey_df is not None and letters:
+                        if gh_df is not None:
+                            # Display Games-Howell results table
+                            st.markdown("#### Pairwise Comparisons")
+                            display_gh_df = gh_df[[
+                                'Group1', 'Group2', 'Mean Diff', 'SE', 'df', 't-stat', 'p-adj', 'Significant']].copy()
+
+                            fig_gh = create_styled_table(
+                                display_gh_df,
+                                title="Games-Howell Pairwise Comparisons",
+                                format_dict={
+                                    'Mean Diff': '{:.4f}', 'SE': '{:.4f}', 'df': '{:.2f}',
+                                    't-stat': '{:.4f}', 'p-adj': '{:.6f}'
+                                },
+                                height=min(150 + len(display_gh_df) * 35, 500)
+                            )
+                            st.plotly_chart(fig_gh, use_container_width=True)
+
+                            # Heatmap
                             groups = sorted(working_df[factor].unique())
                             fig_heatmap = plot_tukey_heatmap(
-                                tukey_df, groups, "Post-hoc Pairwise Comparisons")
+                                gh_df, groups, "Games-Howell Pairwise Comparisons", lower_triangular=True)
                             st.plotly_chart(
                                 fig_heatmap, use_container_width=True)
 
-                            fig = plot_bar_with_error(
-                                working_df, factor, working_value_col, letters)
-                            st.plotly_chart(fig, use_container_width=True)
+                            # Bar chart with letters
+                            if letters:
+                                st.markdown("### Compact Letter Display (CLD)")
+                                group_means = working_df.groupby(
+                                    factor)[working_value_col].mean().sort_values(ascending=False)
+                                letters_df = pd.DataFrame([
+                                    {'Group': g, 'Mean': group_means[g], 'Letter': letters.get(
+                                        g, '')}
+                                    for g in group_means.index
+                                ])
+                                fig_letters = create_styled_table(
+                                    letters_df,
+                                    title="Compact Letter Display",
+                                    format_dict={'Mean': '{:.3f}'},
+                                    height=min(150 + len(letters_df) * 35, 400)
+                                )
+                                st.plotly_chart(
+                                    fig_letters, use_container_width=True)
+
+                                st.markdown(
+                                    "### Bar Chart with Significance Letters")
+                                fig = plot_bar_with_error(
+                                    working_df, factor, working_value_col, letters)
+                                st.plotly_chart(fig, use_container_width=True)
                     else:
                         st.warning(
                             f"**No significant effect** of {factor} (p ≥ 0.05)")
@@ -1859,10 +2393,10 @@ def main():
                     remaining = [f for f in factor_cols if f != factor1]
                     factor2 = col2.selectbox("Factor 2:", remaining, index=0)
 
-                    anova_table, model = perform_two_way_anova(
+                    anova_table, model, add_stats = perform_two_way_anova(
                         working_df, factor1, factor2, working_value_col)
 
-                    if anova_table is not None:
+                    if anova_table is not None and add_stats is not None:
                         st.markdown("### ANOVA Table")
 
                         display_table = anova_table.reset_index()
@@ -1876,6 +2410,38 @@ def main():
 
                         st.dataframe(display_table.style.applymap(highlight_sig_p, subset=['p-value']).format({
                             'Sum Sq': '{:.3f}', 'df': '{:.0f}', 'F': '{:.3f}', 'p-value': '{:.6f}'
+                        }), use_container_width=True, hide_index=True)
+
+                        # Additional Statistics for Two-way ANOVA
+                        st.markdown("### Additional Statistics")
+                        col1, col2, col3, col4 = st.columns(4)
+                        col1.metric("R²", f"{add_stats['r_squared']:.4f}")
+                        col2.metric(
+                            "Adj. R²", f"{add_stats['adj_r_squared']:.4f}")
+                        col3.metric("MSE", f"{add_stats['ms_error']:.4f}")
+                        col4.metric(
+                            "df (Error)", f"{add_stats['df_error']:.0f}")
+
+                        col5, col6, col7, col8 = st.columns(4)
+                        col5.metric(
+                            "Grand Mean", f"{add_stats['grand_mean']:.4f}")
+                        col6.metric("SEm", f"{add_stats['sem']:.4f}")
+                        col7.metric("CD (5%)", f"{add_stats['cd']:.4f}")
+                        col8.metric("N (Total)", f"{add_stats['n_total']:.0f}")
+
+                        # Effect sizes table
+                        st.markdown("#### Effect Sizes by Factor")
+                        effect_data = []
+                        for source, sizes in add_stats['effect_sizes'].items():
+                            effect_data.append({
+                                'Source': source,
+                                'η² (Eta-squared)': sizes['eta_squared'],
+                                'Partial η²': sizes['partial_eta_squared']
+                            })
+                        effect_df = pd.DataFrame(effect_data)
+                        st.dataframe(effect_df.style.format({
+                            'η² (Eta-squared)': '{:.4f}',
+                            'Partial η²': '{:.4f}'
                         }), use_container_width=True, hide_index=True)
 
                         st.markdown("### Interpretation")
@@ -1903,43 +2469,101 @@ def main():
                             st.markdown(
                                 "### Post-hoc Analysis for Significant Effects")
 
+                            # Add selection for which factors to show
+                            selected_posthoc = st.multiselect(
+                                "Select effects to analyze:",
+                                significant_factors,
+                                default=significant_factors,
+                                help="Choose which significant effects to show post-hoc analysis for"
+                            )
+
                             posthoc_results = perform_two_way_posthoc(
                                 working_df, factor1, factor2, working_value_col)
 
-                            for source in significant_factors:
-                                if source in posthoc_results:
+                            for source in selected_posthoc:
+                                # Map source name to key in posthoc_results
+                                if source == factor1:
+                                    result_key = factor1
+                                elif source == factor2:
+                                    result_key = factor2
+                                elif '×' in source:
+                                    result_key = 'Interaction'
+                                else:
+                                    continue
+
+                                if result_key in posthoc_results:
                                     st.markdown(f"#### {source}")
-                                    result = posthoc_results[source]
+                                    result = posthoc_results[result_key]
                                     tukey_df = result['tukey']
                                     letters = result['letters']
 
                                     if tukey_df is not None:
                                         # Determine groups for heatmap
-                                        if source == factor1:
+                                        if result_key == factor1:
                                             groups = sorted(
                                                 working_df[factor1].unique())
-                                        elif source == factor2:
+                                            plot_df = working_df
+                                            plot_factor = factor1
+                                        elif result_key == factor2:
                                             groups = sorted(
                                                 working_df[factor2].unique())
+                                            plot_df = working_df
+                                            plot_factor = factor2
                                         else:  # Interaction
-                                            groups = sorted(tukey_df['Group1'].unique().tolist() +
-                                                            tukey_df['Group2'].unique().tolist())
-                                            groups = sorted(list(set(groups)))
+                                            all_groups = set(
+                                                tukey_df['Group1'].tolist() + tukey_df['Group2'].tolist())
+                                            groups = sorted(list(all_groups))
+                                            # Use the interaction dataframe
+                                            plot_df = result.get(
+                                                'df', working_df)
+                                            plot_factor = 'Interaction'
 
+                                        # Heatmap (lower triangular)
                                         fig = plot_tukey_heatmap(tukey_df, groups,
-                                                                 f"Post-hoc: {source}")
+                                                                 f"Post-hoc: {source}", lower_triangular=True)
                                         st.plotly_chart(
                                             fig, use_container_width=True)
 
                                         if letters:
                                             st.markdown(
-                                                "**Significance Letters:**")
+                                                "**Compact Letter Display (CLD):**")
+                                            st.info(
+                                                "Groups sharing the same letter are NOT significantly different.")
+
+                                            # Get means for proper ordering
+                                            if result_key == 'Interaction':
+                                                group_means = plot_df.groupby('Interaction')[
+                                                    working_value_col].mean().sort_values(ascending=False)
+                                            else:
+                                                group_means = plot_df.groupby(
+                                                    plot_factor)[working_value_col].mean().sort_values(ascending=False)
+
                                             letters_df = pd.DataFrame([
-                                                {'Group': k, 'Letter': v}
-                                                for k, v in sorted(letters.items())
+                                                {'Group': k, 'Mean': group_means.get(
+                                                    k, 0), 'Letter': v}
+                                                for k, v in sorted(letters.items(), key=lambda x: group_means.get(x[0], 0), reverse=True)
                                             ])
-                                            st.dataframe(letters_df, use_container_width=True,
-                                                         hide_index=True)
+                                            fig_letters = create_styled_table(
+                                                letters_df,
+                                                title=f"CLD - {source}",
+                                                format_dict={'Mean': '{:.3f}'},
+                                                height=min(
+                                                    150 + len(letters_df) * 35, 400)
+                                            )
+                                            st.plotly_chart(
+                                                fig_letters, use_container_width=True)
+
+                                            # Bar chart with significance letters
+                                            st.markdown(
+                                                f"**Bar Chart: {source} with Significance Letters**")
+                                            if result_key == 'Interaction':
+                                                fig_bar = plot_bar_with_error(
+                                                    plot_df, 'Interaction', working_value_col, letters)
+                                            else:
+                                                fig_bar = plot_bar_with_error(
+                                                    plot_df, plot_factor, working_value_col, letters)
+                                            st.plotly_chart(
+                                                fig_bar, use_container_width=True)
                     else:
                         st.error(f"Error: {model}")
 
@@ -1983,13 +2607,56 @@ def main():
                             st.markdown(
                                 "**Pairwise p-values (Bonferroni corrected):**")
 
-                            styled_dunn = dunn_result.style.format('{:.4f}').applymap(
-                                lambda x: 'background-color: #d4edda' if x < 0.05 else ''
+                            # Create a styled heatmap-like table for Dunn's test
+                            fig_dunn = go.Figure(data=go.Heatmap(
+                                z=dunn_result.values.astype(float),
+                                x=dunn_result.columns.astype(str),
+                                y=dunn_result.index.astype(str),
+                                colorscale=[[0, '#d62728'], [0.05, '#ff7f0e'], [
+                                    0.1, '#ffbb78'], [1, '#2ca02c']],
+                                zmin=0, zmax=1,
+                                colorbar=dict(
+                                    title=dict(
+                                        text='p-value', font=dict(size=12, color='black')),
+                                    tickfont=dict(size=11, color='black'),
+                                    tickvals=[0, 0.01, 0.05, 0.1, 0.5, 1],
+                                    ticktext=['0', '0.01', '0.05',
+                                              '0.10', '0.50', '1.00'],
+                                ),
+                                hovertemplate='%{y} vs %{x}<br>p-value: %{z:.4f}<extra></extra>',
+                            ))
+
+                            # Add significance annotations
+                            annotations = []
+                            for i, row_name in enumerate(dunn_result.index):
+                                for j, col_name in enumerate(dunn_result.columns):
+                                    val = dunn_result.iloc[i, j]
+                                    if i != j:
+                                        star = "***" if val < 0.001 else "**" if val < 0.01 else "*" if val < 0.05 else ""
+                                        text_color = 'white' if val < 0.05 else 'black'
+                                        annotations.append(dict(
+                                            x=str(col_name), y=str(row_name), text=star,
+                                            showarrow=False,
+                                            font=dict(
+                                                size=11, color=text_color, weight='bold'),
+                                            xanchor='center', yanchor='middle'
+                                        ))
+
+                            fig_dunn.update_layout(
+                                annotations=annotations,
+                                title=dict(text='<b>Dunn\'s Test Pairwise Comparisons</b>',
+                                           font=dict(size=16, color='black'), x=0.5),
+                                xaxis=dict(title='Group', tickfont=dict(
+                                    size=12, color='black')),
+                                yaxis=dict(title='Group', tickfont=dict(
+                                    size=12, color='black'), autorange='reversed'),
+                                height=450, width=550,
+                                paper_bgcolor='white', plot_bgcolor='white'
                             )
-                            st.dataframe(styled_dunn, use_container_width=True)
+                            st.plotly_chart(fig_dunn, use_container_width=True)
 
                             st.caption(
-                                "Green cells indicate significant differences (p < 0.05)")
+                                "Green = not significant, Red/Orange = significant (p < 0.05). Stars: *** p<0.001, ** p<0.01, * p<0.05")
 
                             st.markdown("### Recommended Visualization")
                             fig = plot_boxplot(
@@ -2032,10 +2699,90 @@ def main():
 
                             st.markdown("---")
                             st.markdown("### Post-hoc Analysis (Nemenyi Test)")
-                            st.info(
-                                "For Friedman test, use Nemenyi test or pairwise Wilcoxon tests for post-hoc comparisons.")
 
-                            st.markdown("### Recommended Visualization")
+                            nemenyi_df, letters, cd, rank_summary = perform_nemenyi_test(
+                                df, treatment_factor, block_factor, value_col)
+
+                            if nemenyi_df is not None:
+                                st.info(
+                                    f"**Critical Difference (CD) = {cd:.4f}** - Rank differences greater than CD are significant.")
+
+                                # Rank summary table
+                                st.markdown("#### Mean Ranks by Treatment")
+                                fig_ranks = create_styled_table(
+                                    rank_summary,
+                                    title="Mean Ranks",
+                                    format_dict={'Mean Rank': '{:.3f}'},
+                                    height=min(
+                                        150 + len(rank_summary) * 35, 400)
+                                )
+                                st.plotly_chart(
+                                    fig_ranks, use_container_width=True)
+
+                                # Pairwise comparison table
+                                st.markdown("#### Pairwise Comparisons")
+                                display_nemenyi = nemenyi_df[[
+                                    'Group1', 'Group2', 'Rank Diff', 'CD', 'p-adj', 'Significant']].copy()
+                                fig_nemenyi = create_styled_table(
+                                    display_nemenyi,
+                                    title="Nemenyi Pairwise Comparisons",
+                                    format_dict={'Rank Diff': '{:.4f}',
+                                                 'CD': '{:.4f}', 'p-adj': '{:.6f}'},
+                                    height=min(
+                                        150 + len(display_nemenyi) * 35, 500)
+                                )
+                                st.plotly_chart(
+                                    fig_nemenyi, use_container_width=True)
+
+                                # Heatmap visualization
+                                st.markdown("#### Rank Difference Heatmap")
+                                groups = list(rank_summary['Group'])
+                                fig_heatmap = plot_nemenyi_heatmap(
+                                    nemenyi_df, groups, cd)
+                                st.plotly_chart(
+                                    fig_heatmap, use_container_width=True)
+
+                                # CLD letters
+                                if letters:
+                                    st.markdown(
+                                        "#### Compact Letter Display (CLD)")
+                                    st.info(
+                                        "Groups sharing the same letter are NOT significantly different.")
+
+                                    letters_df = pd.DataFrame([
+                                        {'Group': g, 'Mean Rank': rank_summary[rank_summary['Group'] == g]['Mean Rank'].values[0],
+                                         'Letter': letters.get(g, '')}
+                                        for g in rank_summary['Group']
+                                    ])
+                                    fig_letters = create_styled_table(
+                                        letters_df,
+                                        title="Significance Groups",
+                                        format_dict={'Mean Rank': '{:.3f}'},
+                                        height=min(
+                                            150 + len(letters_df) * 35, 400)
+                                    )
+                                    st.plotly_chart(
+                                        fig_letters, use_container_width=True)
+
+                                # Bar chart with letters
+                                st.markdown(
+                                    "#### Bar Chart with Significance Letters")
+                                # Create summary for bar chart using mean values
+                                group_means = df.groupby(treatment_factor)[value_col].agg(
+                                    ['mean', 'std', 'count']).reset_index()
+                                group_means['se'] = group_means['std'] / \
+                                    np.sqrt(group_means['count'])
+                                group_means = group_means.sort_values(
+                                    treatment_factor)
+
+                                fig_bar = plot_bar_with_error(
+                                    df, treatment_factor, value_col, letters)
+                                st.plotly_chart(
+                                    fig_bar, use_container_width=True)
+                            else:
+                                st.warning("Could not perform Nemenyi test.")
+
+                            st.markdown("### Interaction Visualization")
                             fig = plot_interaction(
                                 df, treatment_factor, block_factor, value_col)
                             st.plotly_chart(fig, use_container_width=True)
@@ -2075,7 +2822,7 @@ def main():
                     if f_stat:
                         sig = "Significant" if p_val < 0.05 else "Not significant"
                         analyses_results[f"One-way ANOVA ({factor})"] = (
-                            f"F = {f_stat:.3f}, p = {p_val:.6f}, η² = {add_stats['eta_squared']:.3f} ({sig})<br>"
+                            f"F = {f_stat:.3f}, p = {p_val:.6f}, η² = {add_stats['eta_squared']:.3f}, ω² = {add_stats['omega_squared']:.3f} ({sig})<br>"
                             f"SEm = {add_stats['sem']:.4f}, CD (5%) = {add_stats['cd']:.4f}"
                         )
 
@@ -2099,7 +2846,7 @@ def main():
     st.sidebar.markdown(
         """
     <small>
-    <b>Agricultural Experiment Analysis v2.1</b><br>
+    <b>Agricultural Experiment Analysis v2.2</b><br>
     Developed by  
     <a href="https://scholar.google.com/citations?user=Es-kJk4AAAAJ&hl=en" target="_blank">
         Dr. Sandip Garai
