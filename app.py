@@ -14,7 +14,7 @@ Features:
 - HTML Report Generation
 
 Author: Statistical Analysis Tool
-Version: 2.2
+Version: 2.3
 """
 
 import streamlit as st
@@ -75,6 +75,114 @@ COLOR_PALETTES = {
 
 MONTH_ORDER = ['January', 'February', 'March', 'April', 'May', 'June',
                'July', 'August', 'September', 'October', 'November', 'December']
+
+# Plotly config for SVG download
+PLOTLY_CONFIG = {
+    'toImageButtonOptions': {
+        'format': 'svg',
+        'filename': 'figure',
+        'height': 600,
+        'width': 900,
+        'scale': 2
+    },
+    'displaylogo': False,
+    'modeBarButtonsToAdd': ['downloadImage'],
+    'modeBarButtonsToRemove': ['lasso2d', 'select2d']
+}
+
+
+def style_dataframe(df, format_dict=None, highlight_col=None, highlight_condition=None):
+    """Apply publication-quality styling to a dataframe"""
+
+    # Create a copy for display
+    styled = df.style
+
+    # Apply number formatting
+    if format_dict:
+        styled = styled.format(format_dict, na_rep='-')
+
+    # Base styling
+    styled = styled.set_properties(**{
+        'text-align': 'center',
+        'font-size': '14px',
+        'border': '1px solid #ddd',
+        'padding': '8px'
+    })
+
+    # Header styling
+    styled = styled.set_table_styles([
+        {'selector': 'th', 'props': [
+            ('background-color', '#1f77b4'),
+            ('color', 'white'),
+            ('font-weight', 'bold'),
+            ('text-align', 'center'),
+            ('font-size', '14px'),
+            ('padding', '10px'),
+            ('border', '1px solid #1f77b4')
+        ]},
+        {'selector': 'td', 'props': [
+            ('text-align', 'center'),
+            ('padding', '8px')
+        ]},
+        {'selector': 'tr:nth-child(even)', 'props': [
+            ('background-color', '#f9f9f9')
+        ]},
+        {'selector': 'tr:hover', 'props': [
+            ('background-color', '#e8f4f8')
+        ]},
+        {'selector': 'table', 'props': [
+            ('border-collapse', 'collapse'),
+            ('width', '100%'),
+            ('margin', '10px 0')
+        ]}
+    ])
+
+    # Highlight significant rows if Significant column exists
+    if 'Significant' in df.columns:
+        def highlight_significant(row):
+            if row.get('Significant', False) == True:
+                return ['background-color: #d4edda'] * len(row)
+            return [''] * len(row)
+        styled = styled.apply(highlight_significant, axis=1)
+
+    # Highlight specific column based on condition
+    if highlight_col and highlight_condition and highlight_col in df.columns:
+        def highlight_cell(val):
+            try:
+                if highlight_condition(val):
+                    return 'background-color: #d4edda'
+            except:
+                pass
+            return ''
+        styled = styled.applymap(highlight_cell, subset=[highlight_col])
+
+    return styled
+
+
+def display_styled_table(df, title="", format_dict=None, highlight_col=None,
+                         highlight_condition=None, key=None):
+    """Display a styled table with download option"""
+
+    if title:
+        st.markdown(f"**{title}**")
+
+    # Apply styling
+    styled = style_dataframe(
+        df, format_dict, highlight_col, highlight_condition)
+
+    # Display the table
+    st.dataframe(styled, use_container_width=True, hide_index=True)
+
+    # Add download button
+    csv = df.to_csv(index=False)
+    download_key = key if key else f"download_{title.replace(' ', '_')}_{id(df)}"
+    st.download_button(
+        label="📥 Download CSV",
+        data=csv,
+        file_name=f"{title.replace(' ', '_').lower() if title else 'table'}.csv",
+        mime="text/csv",
+        key=download_key
+    )
 
 
 # ========================================
@@ -1738,8 +1846,151 @@ def plot_distribution_histogram(df, value_col, factor_col=None):
     return fig
 
 
+def style_dataframe(df, format_dict=None, highlight_col=None, highlight_condition=None):
+    """Apply publication-quality styling to a pandas DataFrame"""
+
+    # Create a copy for styling
+    styled = df.style
+
+    # Apply number formatting
+    if format_dict:
+        styled = styled.format(format_dict, na_rep='-')
+
+    # Base styling
+    styled = styled.set_properties(**{
+        'text-align': 'center',
+        'font-size': '14px',
+        'border': '1px solid #ddd',
+        'padding': '8px'
+    })
+
+    # Header styling
+    styled = styled.set_table_styles([
+        {'selector': 'th', 'props': [
+            ('background-color', '#1f77b4'),
+            ('color', 'white'),
+            ('font-weight', 'bold'),
+            ('text-align', 'center'),
+            ('font-size', '14px'),
+            ('padding', '10px'),
+            ('border', '1px solid #1f77b4')
+        ]},
+        {'selector': 'td', 'props': [
+            ('text-align', 'center'),
+            ('padding', '8px')
+        ]},
+        {'selector': 'tr:nth-child(even)', 'props': [
+            ('background-color', '#f9f9f9')
+        ]},
+        {'selector': 'tr:hover', 'props': [
+            ('background-color', '#e8f4fc')
+        ]},
+        {'selector': '', 'props': [
+            ('border-collapse', 'collapse'),
+            ('width', '100%')
+        ]}
+    ])
+
+    # Row highlighting based on condition
+    if highlight_col and highlight_condition:
+        def highlight_row(row):
+            try:
+                if highlight_condition(row[highlight_col]):
+                    return ['background-color: #d4edda'] * len(row)
+            except:
+                pass
+            return [''] * len(row)
+        styled = styled.apply(highlight_row, axis=1)
+
+    # Highlight significant rows
+    if 'Significant' in df.columns:
+        def highlight_sig(row):
+            try:
+                if row['Significant'] == True:
+                    return ['background-color: #d4edda'] * len(row)
+            except:
+                pass
+            return [''] * len(row)
+        styled = styled.apply(highlight_sig, axis=1)
+
+    return styled
+
+
+def display_styled_table(df, title="", format_dict=None, highlight_col=None,
+                         highlight_condition=None, key=None):
+    """Display a styled table with download option"""
+
+    if title:
+        st.markdown(f"**{title}**")
+
+    # Apply styling
+    styled = style_dataframe(
+        df, format_dict, highlight_col, highlight_condition)
+
+    # Display table
+    st.dataframe(styled, use_container_width=True, hide_index=True)
+
+    # Download button
+    csv = df.to_csv(index=False)
+    download_key = key or f"download_{title.replace(' ', '_')}_{id(df)}"
+    st.download_button(
+        label="📥 Download CSV",
+        data=csv,
+        file_name=f"{title.replace(' ', '_').lower() or 'table'}.csv",
+        mime="text/csv",
+        key=download_key
+    )
+
+
+def download_figure_as_svg(fig, filename, key):
+    """Add SVG download button for a Plotly figure"""
+    # Convert to SVG
+    svg_bytes = fig.to_image(format="svg")
+
+    st.download_button(
+        label="📥 Download SVG",
+        data=svg_bytes,
+        file_name=f"{filename}.svg",
+        mime="image/svg+xml",
+        key=key
+    )
+
+
+def display_figure_with_download(fig, filename, key_prefix):
+    """Display a Plotly figure with SVG download option"""
+    st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
+
+    # Try to add SVG download (requires kaleido)
+    try:
+        svg_bytes = fig.to_image(format="svg")
+        st.download_button(
+            label="📥 Download SVG",
+            data=svg_bytes,
+            file_name=f"{filename}.svg",
+            mime="image/svg+xml",
+            key=f"{key_prefix}_{filename}"
+        )
+    except Exception as e:
+        # Fallback to HTML download if kaleido not available
+        html_str = fig.to_html(include_plotlyjs='cdn')
+        st.download_button(
+            label="📥 Download HTML",
+            data=html_str,
+            file_name=f"{filename}.html",
+            mime="text/html",
+            key=f"{key_prefix}_{filename}"
+        )
+
+
 def create_styled_table(df, title="", highlight_col=None, highlight_condition=None,
                         format_dict=None, height=400):
+    """Create a publication-quality styled table using Plotly - DEPRECATED, use display_styled_table"""
+    # Keep for backward compatibility but redirect to new function
+    return _create_plotly_table(df, title, highlight_col, highlight_condition, format_dict, height)
+
+
+def _create_plotly_table(df, title="", highlight_col=None, highlight_condition=None,
+                         format_dict=None, height=400):
     """Create a publication-quality styled table using Plotly"""
 
     # Prepare data with formatting
@@ -2260,12 +2511,11 @@ def main():
                     f"{data.max():.3f}"
                 ]
             }
-            fig_stats = create_styled_table(
+            display_styled_table(
                 pd.DataFrame(stats_data),
                 title=f"Response Variable: {value_col}",
-                height=450
+                key="stats_overview"
             )
-            st.plotly_chart(fig_stats, use_container_width=True)
 
         with tab2:
             st.subheader("Summary Statistics by Group")
@@ -2282,17 +2532,12 @@ def main():
 
             format_dict = {col: '{:.3f}' for col in summary.select_dtypes(
                 include=[np.number]).columns}
-            fig_summary = create_styled_table(
+            display_styled_table(
                 summary,
                 title="Summary Statistics by Group",
                 format_dict=format_dict,
-                height=min(200 + len(summary) * 35, 600)
+                key="summary_stats"
             )
-            st.plotly_chart(fig_summary, use_container_width=True)
-
-            csv = summary.to_csv(index=False)
-            st.download_button("Download Summary", csv,
-                               "summary_statistics.csv", "text/csv")
 
         with tab3:
             st.subheader("Raw Data")
@@ -2308,16 +2553,11 @@ def main():
                 if vals:
                     filtered_df = filtered_df[filtered_df[col].isin(vals)]
 
-            if len(filtered_df) <= 100:
-                fig_raw = create_styled_table(
-                    filtered_df,
-                    title="Raw Data",
-                    height=min(200 + len(filtered_df) * 30, 600)
-                )
-                st.plotly_chart(fig_raw, use_container_width=True)
-            else:
-                st.dataframe(
-                    filtered_df, use_container_width=True, hide_index=True)
+            display_styled_table(
+                filtered_df,
+                title="Raw Data",
+                key="raw_data"
+            )
             st.caption(f"Showing {len(filtered_df)} of {len(df)} observations")
 
     # ========================================
@@ -2378,7 +2618,7 @@ def main():
             ) or 'time' in f.lower() or 'date' in f.lower()] or factor_cols)
             fig = plot_temporal_trend(df, time_col, value_col)
 
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
 
     # ========================================
     # PAGE 3: Statistical Analysis
@@ -2429,15 +2669,14 @@ def main():
                         return 'background-color: #f8d7da'
                     return ''
 
-                fig_normality = create_styled_table(
+                display_styled_table(
                     results_df,
                     title="Shapiro-Wilk Normality Test",
                     format_dict={'W-stat': '{:.4f}', 'p-value': '{:.4f}'},
                     highlight_col='Result',
                     highlight_condition=lambda x: x == 'Normal',
-                    height=min(180 + len(results_df) * 35, 500)
+                    key="normality_test"
                 )
-                st.plotly_chart(fig_normality, use_container_width=True)
 
                 normality_violated = any(
                     r['Result'] == 'Non-normal' for r in results if r['Group'] != 'Overall')
@@ -2455,15 +2694,14 @@ def main():
                         {'Factor': factor, 'Statistic': stat, 'p-value': p, 'Result': interp})
 
                 levene_df = pd.DataFrame(levene_results)
-                fig_levene = create_styled_table(
+                display_styled_table(
                     levene_df,
                     title="Levene's Homogeneity Test",
                     format_dict={'Statistic': '{:.4f}', 'p-value': '{:.4f}'},
                     highlight_col='Result',
                     highlight_condition=lambda x: x == 'Homogeneous',
-                    height=min(180 + len(levene_df) * 35, 400)
+                    key="levene_test"
                 )
-                st.plotly_chart(fig_levene, use_container_width=True)
 
                 homogeneity_violated = any(
                     r['Result'] == 'Heterogeneous' for r in levene_results)
@@ -2563,16 +2801,15 @@ def main():
                     st.markdown("### ANOVA Table")
                     anova_df = pd.DataFrame(anova_table)
 
-                    fig_anova = create_styled_table(
+                    display_styled_table(
                         anova_df,
                         title="One-way ANOVA Table",
                         format_dict={
                             'SS': '{:.4f}', 'df': '{:.0f}', 'MS': '{:.4f}',
                             'F': '{:.4f}', 'p-value': '{:.6f}'
                         },
-                        height=220
+                        key="anova_table"
                     )
-                    st.plotly_chart(fig_anova, use_container_width=True)
 
                     # Additional statistics
                     st.markdown("### Additional Statistics")
@@ -2607,7 +2844,7 @@ def main():
                             fig_heatmap = plot_tukey_heatmap(
                                 tukey_df, groups, lower_triangular=True)
                             st.plotly_chart(
-                                fig_heatmap, use_container_width=True)
+                                fig_heatmap, use_container_width=True, config=PLOTLY_CONFIG)
 
                             # Significance letters
                             if letters:
@@ -2625,20 +2862,19 @@ def main():
                                         g, '')}
                                     for g in group_means.index
                                 ])
-                                fig_letters = create_styled_table(
+                                display_styled_table(
                                     letters_df,
                                     title="Compact Letter Display",
                                     format_dict={'Mean': '{:.3f}'},
-                                    height=min(150 + len(letters_df) * 35, 400)
+                                    key="cld_oneway"
                                 )
-                                st.plotly_chart(
-                                    fig_letters, use_container_width=True)
 
                                 st.markdown(
                                     "### Bar Chart with Significance Letters")
                                 fig = plot_bar_with_error(
                                     working_df, factor, working_value_col, letters)
-                                st.plotly_chart(fig, use_container_width=True)
+                                st.plotly_chart(
+                                    fig, use_container_width=True, config=PLOTLY_CONFIG)
                     else:
                         st.warning(
                             f"⚠️ **No significant effect** of {factor} on {value_col}{transform_label} (p ≥ 0.05)")
@@ -2657,14 +2893,13 @@ def main():
                 if f_stat is not None:
                     st.markdown("### Welch's ANOVA Results")
                     welch_df = pd.DataFrame(welch_table)
-                    fig_welch = create_styled_table(
+                    display_styled_table(
                         welch_df,
                         title="Welch's ANOVA Table",
                         format_dict={'df': '{:.2f}',
                                      'F': '{:.4f}', 'p-value': '{:.6f}'},
-                        height=180
+                        key="welch_table"
                     )
-                    st.plotly_chart(fig_welch, use_container_width=True)
 
                     col1, col2 = st.columns(2)
                     col1.metric("Welch's F", f"{f_stat:.4f}")
@@ -2688,14 +2923,13 @@ def main():
                         'Variance': list(add_stats['group_variances'].values()),
                         'n': list(add_stats['group_ns'].values())
                     })
-                    fig_group_stats = create_styled_table(
+                    display_styled_table(
                         group_stats_df,
                         title="Group Statistics",
                         format_dict={'Mean': '{:.4f}',
                                      'Variance': '{:.4f}', 'n': '{:.0f}'},
-                        height=min(180 + len(group_stats_df) * 35, 400)
+                        key="group_stats"
                     )
-                    st.plotly_chart(fig_group_stats, use_container_width=True)
 
                     if p_value < 0.05:
                         st.success(
@@ -2715,23 +2949,22 @@ def main():
                             display_gh_df = gh_df[[
                                 'Group1', 'Group2', 'Mean Diff', 'SE', 'df', 't-stat', 'p-adj', 'Significant']].copy()
 
-                            fig_gh = create_styled_table(
+                            display_styled_table(
                                 display_gh_df,
                                 title="Games-Howell Pairwise Comparisons",
                                 format_dict={
                                     'Mean Diff': '{:.4f}', 'SE': '{:.4f}', 'df': '{:.2f}',
                                     't-stat': '{:.4f}', 'p-adj': '{:.6f}'
                                 },
-                                height=min(150 + len(display_gh_df) * 35, 500)
+                                key="gh_pairwise"
                             )
-                            st.plotly_chart(fig_gh, use_container_width=True)
 
                             # Heatmap
                             groups = sorted(working_df[factor].unique())
                             fig_heatmap = plot_tukey_heatmap(
                                 gh_df, groups, "Games-Howell Pairwise Comparisons", lower_triangular=True)
                             st.plotly_chart(
-                                fig_heatmap, use_container_width=True)
+                                fig_heatmap, use_container_width=True, config=PLOTLY_CONFIG)
 
                             # Bar chart with letters
                             if letters:
@@ -2743,20 +2976,19 @@ def main():
                                         g, '')}
                                     for g in group_means.index
                                 ])
-                                fig_letters = create_styled_table(
+                                display_styled_table(
                                     letters_df,
                                     title="Compact Letter Display",
                                     format_dict={'Mean': '{:.3f}'},
-                                    height=min(150 + len(letters_df) * 35, 400)
+                                    key="cld_welch"
                                 )
-                                st.plotly_chart(
-                                    fig_letters, use_container_width=True)
 
                                 st.markdown(
                                     "### Bar Chart with Significance Letters")
                                 fig = plot_bar_with_error(
                                     working_df, factor, working_value_col, letters)
-                                st.plotly_chart(fig, use_container_width=True)
+                                st.plotly_chart(
+                                    fig, use_container_width=True, config=PLOTLY_CONFIG)
                     else:
                         st.warning(
                             f"**No significant effect** of {factor} (p ≥ 0.05)")
@@ -2785,7 +3017,7 @@ def main():
                                 return 'background-color: #d4edda; font-weight: bold'
                             return ''
 
-                        fig_twoway = create_styled_table(
+                        display_styled_table(
                             display_table,
                             title="Two-way ANOVA Table",
                             format_dict={
@@ -2794,9 +3026,8 @@ def main():
                             highlight_col='p-value',
                             highlight_condition=lambda x: isinstance(
                                 x, (int, float)) and x < 0.05,
-                            height=250
+                            key="twoway_anova"
                         )
-                        st.plotly_chart(fig_twoway, use_container_width=True)
 
                         # Additional Statistics for Two-way ANOVA
                         st.markdown("### Additional Statistics")
@@ -2825,16 +3056,15 @@ def main():
                                 'Partial η²': sizes['partial_eta_squared']
                             })
                         effect_df = pd.DataFrame(effect_data)
-                        fig_effect = create_styled_table(
+                        display_styled_table(
                             effect_df,
                             title="Effect Sizes by Factor",
                             format_dict={
                                 'η² (Eta-squared)': '{:.4f}',
                                 'Partial η²': '{:.4f}'
                             },
-                            height=min(180 + len(effect_df) * 35, 350)
+                            key="effect_sizes"
                         )
-                        st.plotly_chart(fig_effect, use_container_width=True)
 
                         st.markdown("### Interpretation")
                         significant_factors = []
@@ -2862,10 +3092,12 @@ def main():
                                 "### Post-hoc Analysis for Significant Effects")
 
                             # Add selection for which factors to show
+                            default_selection = [
+                                f for f in significant_factors if '×' not in f]
                             selected_posthoc = st.multiselect(
                                 "Select effects to analyze:",
                                 significant_factors,
-                                default=significant_factors,
+                                default=default_selection,
                                 help="Choose which significant effects to show post-hoc analysis for"
                             )
 
@@ -2914,7 +3146,7 @@ def main():
                                         fig = plot_tukey_heatmap(tukey_df, groups,
                                                                  f"Post-hoc: {source}", lower_triangular=True)
                                         st.plotly_chart(
-                                            fig, use_container_width=True)
+                                            fig, use_container_width=True, config=PLOTLY_CONFIG)
 
                                         if letters:
                                             st.markdown(
@@ -2935,15 +3167,12 @@ def main():
                                                     k, 0), 'Letter': v}
                                                 for k, v in sorted(letters.items(), key=lambda x: group_means.get(x[0], 0), reverse=True)
                                             ])
-                                            fig_letters = create_styled_table(
+                                            display_styled_table(
                                                 letters_df,
                                                 title=f"CLD - {source}",
                                                 format_dict={'Mean': '{:.3f}'},
-                                                height=min(
-                                                    150 + len(letters_df) * 35, 400)
+                                                key=f"cld_twoway_{source.replace(' ', '_')}"
                                             )
-                                            st.plotly_chart(
-                                                fig_letters, use_container_width=True)
 
                                             # Bar chart with significance letters
                                             st.markdown(
@@ -2978,7 +3207,7 @@ def main():
                                                 fig_bar = plot_bar_with_error(
                                                     plot_df, plot_factor, working_value_col, letters)
                                             st.plotly_chart(
-                                                fig_bar, use_container_width=True)
+                                                fig_bar, use_container_width=True, config=PLOTLY_CONFIG)
                     else:
                         st.error(f"Error: {model}")
 
@@ -3094,12 +3323,14 @@ def main():
                                 margin=dict(r=180),
                                 paper_bgcolor='white', plot_bgcolor='white'
                             )
-                            st.plotly_chart(fig_dunn, use_container_width=True)
+                            st.plotly_chart(
+                                fig_dunn, use_container_width=True, config=PLOTLY_CONFIG)
 
                             st.markdown("### Recommended Visualization")
                             fig = plot_boxplot(
                                 df, factor, value_col, show_points=True)
-                            st.plotly_chart(fig, use_container_width=True)
+                            st.plotly_chart(
+                                fig, use_container_width=True, config=PLOTLY_CONFIG)
                     else:
                         st.warning(
                             f"⚠️ **No significant difference** among {factor} groups (p ≥ 0.05)")
@@ -3147,30 +3378,24 @@ def main():
 
                                 # Rank summary table
                                 st.markdown("#### Mean Ranks by Treatment")
-                                fig_ranks = create_styled_table(
+                                display_styled_table(
                                     rank_summary,
                                     title="Mean Ranks",
                                     format_dict={'Mean Rank': '{:.3f}'},
-                                    height=min(
-                                        150 + len(rank_summary) * 35, 400)
+                                    key="nemenyi_ranks"
                                 )
-                                st.plotly_chart(
-                                    fig_ranks, use_container_width=True)
 
                                 # Pairwise comparison table
                                 st.markdown("#### Pairwise Comparisons")
                                 display_nemenyi = nemenyi_df[[
                                     'Group1', 'Group2', 'Rank Diff', 'CD', 'p-adj', 'Significant']].copy()
-                                fig_nemenyi = create_styled_table(
+                                display_styled_table(
                                     display_nemenyi,
                                     title="Nemenyi Pairwise Comparisons",
                                     format_dict={'Rank Diff': '{:.4f}',
                                                  'CD': '{:.4f}', 'p-adj': '{:.6f}'},
-                                    height=min(
-                                        150 + len(display_nemenyi) * 35, 500)
+                                    key="nemenyi_pairwise"
                                 )
-                                st.plotly_chart(
-                                    fig_nemenyi, use_container_width=True)
 
                                 # Heatmap visualization
                                 st.markdown("#### Rank Difference Heatmap")
@@ -3178,7 +3403,7 @@ def main():
                                 fig_heatmap = plot_nemenyi_heatmap(
                                     nemenyi_df, groups, cd)
                                 st.plotly_chart(
-                                    fig_heatmap, use_container_width=True)
+                                    fig_heatmap, use_container_width=True, config=PLOTLY_CONFIG)
 
                                 # CLD letters
                                 if letters:
@@ -3192,15 +3417,12 @@ def main():
                                          'Letter': letters.get(g, '')}
                                         for g in rank_summary['Group']
                                     ])
-                                    fig_letters = create_styled_table(
+                                    display_styled_table(
                                         letters_df,
                                         title="Significance Groups",
                                         format_dict={'Mean Rank': '{:.3f}'},
-                                        height=min(
-                                            150 + len(letters_df) * 35, 400)
+                                        key="nemenyi_cld"
                                     )
-                                    st.plotly_chart(
-                                        fig_letters, use_container_width=True)
 
                                 # Bar chart with letters
                                 st.markdown(
@@ -3216,14 +3438,15 @@ def main():
                                 fig_bar = plot_bar_with_error(
                                     df, treatment_factor, value_col, letters)
                                 st.plotly_chart(
-                                    fig_bar, use_container_width=True)
+                                    fig_bar, use_container_width=True, config=PLOTLY_CONFIG)
                             else:
                                 st.warning("Could not perform Nemenyi test.")
 
                             st.markdown("### Interaction Visualization")
                             fig = plot_interaction(
                                 df, treatment_factor, block_factor, value_col)
-                            st.plotly_chart(fig, use_container_width=True)
+                            st.plotly_chart(
+                                fig, use_container_width=True, config=PLOTLY_CONFIG)
                         else:
                             st.warning(
                                 f"⚠️ **No significant effect** of {treatment_factor} (p ≥ 0.05)")
@@ -3284,7 +3507,18 @@ def main():
     st.sidebar.markdown(
         """
     <small>
-    <b>Agricultural Experiment Analysis v2.2</b><br>
+    <b>📥 Download Options:</b><br>
+    • Tables: Click "Download CSV" below each table<br>
+    • Figures: Click camera icon (📷) in figure toolbar → SVG<br>
+    </small>
+    """,
+        unsafe_allow_html=True
+    )
+    st.sidebar.markdown("---")
+    st.sidebar.markdown(
+        """
+    <small>
+    <b>Agricultural Experiment Analysis v2.3</b><br>
     Developed by  
     <a href="https://scholar.google.com/citations?user=Es-kJk4AAAAJ&hl=en" target="_blank">
         Dr. Sandip Garai
