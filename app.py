@@ -79,7 +79,7 @@ MONTH_ORDER = ['January', 'February', 'March', 'April', 'May', 'June',
 # Plotly config for PNG download
 PLOTLY_CONFIG = {
     'toImageButtonOptions': {
-        'format': 'png',     # ✅ PNG only
+        'format': 'png',     # PNG only
         'filename': 'figure',
         'scale': 2           # keep scale for quality (optional)
     },
@@ -137,8 +137,12 @@ def style_dataframe(df, format_dict=None, highlight_col=None, highlight_conditio
     # Highlight significant rows if Significant column exists
     if 'Significant' in df.columns:
         def highlight_significant(row):
-            if row.get('Significant', False) == True:
-                return ['background-color: #d4edda'] * len(row)
+            if row.get('Significant', False):
+                return [
+                    'border-left: 6px solid #2e7d32;',
+                    'font-weight: 600;',
+                    'background-color: #ffffff;'  # keep clean
+                ] * len(row)
             return [''] * len(row)
         styled = styled.apply(highlight_significant, axis=1)
 
