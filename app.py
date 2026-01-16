@@ -1401,7 +1401,7 @@ def main():
     else:
         try:
             df = load_data('data.csv')
-            st.sidebar.info("📂 Using data.csv from project folder")
+            st.sidebar.info("Using data.csv from project folder")
         except:
             st.sidebar.warning(
                 "⚠️ No data loaded. Upload a file or place data.csv in project folder.")
@@ -2117,3 +2117,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
