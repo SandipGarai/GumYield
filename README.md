@@ -507,10 +507,10 @@ This software is provided for academic and research purposes.
 
 | Version | Date | Changes |
 |---------|------|---------|
-| 2.2 | 2025 | Added Games-Howell test, lower triangular heatmaps, additional statistics, interaction bar charts |
-| 2.1 | 2025 | Fixed CLD algorithm, improved visualizations |
-| 2.0 | 2025 | Added two-way ANOVA, non-parametric tests |
-| 1.0 | 2024 | Initial release |
+| 2.2 | 2026 | Added Games-Howell test, lower triangular heatmaps, additional statistics, interaction bar charts |
+| 2.1 | 2026 | Fixed CLD algorithm, improved visualizations |
+| 2.0 | 2026 | Added two-way ANOVA, non-parametric tests |
+| 1.0 | 2026 | Initial release |
 
 ---
 
