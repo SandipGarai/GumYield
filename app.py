@@ -1271,7 +1271,7 @@ def generate_html_report(df, factor_cols, value_col, analyses_results):
     </head>
     <body>
         <div class="header">
-            <h1>📊 Statistical Analysis Report</h1>
+            <h1>Statistical Analysis Report</h1>
             <p>Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
         </div>
         
@@ -1358,12 +1358,12 @@ def generate_html_report(df, factor_cols, value_col, analyses_results):
 # Main Application
 # ========================================
 def main():
-    st.title("🌳 Agricultural Experiment Statistical Analysis")
+    st.title("Agricultural Experiment Statistical Analysis")
 
     # Sidebar
-    st.sidebar.title("📊 Navigation")
+    st.sidebar.title("Navigation")
 
-    with st.sidebar.expander("📖 Data Preparation Guide", expanded=False):
+    with st.sidebar.expander("Data Preparation Guide", expanded=False):
         st.markdown("""
         **Required Data Format:**
         
@@ -1386,7 +1386,7 @@ def main():
         """)
 
     st.sidebar.markdown("---")
-    st.sidebar.markdown("### 📁 Data Upload")
+    st.sidebar.markdown("### Data Upload")
     uploaded_file = st.sidebar.file_uploader(
         "Upload your CSV file",
         type=['csv'],
@@ -1397,7 +1397,7 @@ def main():
     df = None
     if uploaded_file is not None:
         df = load_data(uploaded_file)
-        st.sidebar.success("✅ File uploaded successfully!")
+        st.sidebar.success("File uploaded successfully!")
     else:
         try:
             df = load_data('data.csv')
@@ -1427,15 +1427,15 @@ def main():
     st.sidebar.markdown("---")
     page = st.sidebar.radio(
         "Select Analysis",
-        ["📋 Data Summary", "📈 Visualization",
-            "🔬 Statistical Analysis", "📄 Report Generation"]
+        ["Data Summary", "Visualization",
+            "Statistical Analysis", "Report Generation"]
     )
 
     # ========================================
     # PAGE 1: Data Summary
     # ========================================
-    if page == "📋 Data Summary":
-        st.header("📋 Data Summary")
+    if page == "Data Summary":
+        st.header("Data Summary")
 
         tab1, tab2, tab3 = st.tabs(
             ["Overview", "Summary Statistics", "Raw Data"])
@@ -1514,8 +1514,8 @@ def main():
     # ========================================
     # PAGE 2: Visualization
     # ========================================
-    elif page == "📈 Visualization":
-        st.header("📈 Statistical Visualization")
+    elif page == "Visualization":
+        st.header("Statistical Visualization")
 
         viz_options = [
             "Box Plot",
@@ -1574,8 +1574,8 @@ def main():
     # ========================================
     # PAGE 3: Statistical Analysis
     # ========================================
-    elif page == "🔬 Statistical Analysis":
-        st.header("🔬 Statistical Analysis")
+    elif page == "Statistical Analysis":
+        st.header("Statistical Analysis")
 
         analysis_type = st.selectbox(
             "Select Analysis Type:",
@@ -1588,7 +1588,7 @@ def main():
         # ASSUMPTION TESTING
         # ========================================
         if analysis_type == "Assumption Testing":
-            st.subheader("📊 ANOVA Assumptions")
+            st.subheader("ANOVA Assumptions")
 
             test_factor = st.selectbox(
                 "Select Factor for Testing:", factor_cols)
@@ -1648,7 +1648,7 @@ def main():
                     r['Result'] == 'Heterogeneous' for r in levene_results)
 
             st.markdown("---")
-            st.markdown("### 📋 Recommendations")
+            st.markdown("### Recommendations")
 
             if normality_violated or homogeneity_violated:
                 st.warning("⚠️ One or more assumptions are violated!")
@@ -1667,13 +1667,13 @@ def main():
                         "   - Homogeneity violated: Use **Welch's ANOVA** (available in ANOVA section) or non-parametric tests")
             else:
                 st.success(
-                    "✅ All assumptions are satisfied. Proceed with parametric ANOVA.")
+                    "All assumptions are satisfied. Proceed with parametric ANOVA.")
 
         # ========================================
         # ANOVA
         # ========================================
         elif analysis_type == "ANOVA":
-            st.subheader("📊 Analysis of Variance (ANOVA)")
+            st.subheader("Analysis of Variance (ANOVA)")
 
             data_type = st.radio(
                 "Data Type:", ["Original Data", "Transformed Data"], horizontal=True)
@@ -1719,7 +1719,7 @@ def main():
                             transformed_vals)
                         st.markdown(f"Shapiro-Wilk p = {p:.4f} ({interp})")
 
-                    st.success("✅ Transformation applied successfully!")
+                    st.success("Transformation applied successfully!")
                 except Exception as e:
                     st.error(f"Transformation failed: {str(e)}")
                     working_value_col = value_col
@@ -1758,7 +1758,7 @@ def main():
 
                     if p_value < 0.05:
                         st.success(
-                            f"✅ **Significant effect** of {factor} on {value_col}{transform_label} (p < 0.05)")
+                            f"**Significant effect** of {factor} on {value_col}{transform_label} (p < 0.05)")
 
                         st.markdown("---")
                         st.markdown("### Post-hoc Analysis (Tukey HSD)")
@@ -1826,7 +1826,7 @@ def main():
 
                     if p_value < 0.05:
                         st.success(
-                            f"✅ **Significant effect** of {factor} (p < 0.05)")
+                            f"**Significant effect** of {factor} (p < 0.05)")
 
                         st.markdown("---")
                         st.markdown("### Post-hoc Analysis (Games-Howell)")
@@ -1848,7 +1848,7 @@ def main():
                             st.plotly_chart(fig, use_container_width=True)
                     else:
                         st.warning(
-                            f"⚠️ **No significant effect** of {factor} (p ≥ 0.05)")
+                            f"**No significant effect** of {factor} (p ≥ 0.05)")
 
             else:  # Two-way ANOVA
                 if len(factor_cols) < 2:
@@ -1947,7 +1947,7 @@ def main():
         # NON-PARAMETRIC TESTS
         # ========================================
         elif analysis_type == "Non-parametric Tests":
-            st.subheader("📊 Non-parametric Tests")
+            st.subheader("Non-parametric Tests")
             st.info("Use when ANOVA assumptions are violated")
 
             test_type = st.radio("Select Test:", [
@@ -1970,7 +1970,7 @@ def main():
 
                     if p_value < 0.05:
                         st.success(
-                            f"✅ **Significant difference** among {factor} groups (p < 0.05)")
+                            f"**Significant difference** among {factor} groups (p < 0.05)")
 
                         st.markdown("---")
                         st.markdown("### Post-hoc Analysis (Dunn's Test)")
@@ -2028,7 +2028,7 @@ def main():
 
                         if p_value < 0.05:
                             st.success(
-                                f"✅ **Significant effect** of {treatment_factor} (p < 0.05)")
+                                f"**Significant effect** of {treatment_factor} (p < 0.05)")
 
                             st.markdown("---")
                             st.markdown("### Post-hoc Analysis (Nemenyi Test)")
@@ -2046,13 +2046,13 @@ def main():
     # ========================================
     # PAGE 4: Report Generation
     # ========================================
-    elif page == "📄 Report Generation":
-        st.header("📄 Report Generation")
+    elif page == "Report Generation":
+        st.header("Report Generation")
 
         st.markdown("""
         Generate a comprehensive HTML report of your analysis.
         
-        ### 📋 Report Contents Guide
+        ### Report Contents Guide
         
         **Your report should include:**
         
@@ -2067,7 +2067,7 @@ def main():
 
         analyses_results = {}
 
-        if st.button("🔄 Generate HTML Report"):
+        if st.button("Generate HTML Report"):
             with st.spinner("Generating report..."):
                 for factor in factor_cols[:2]:
                     f_stat, p_val, anova_table, add_stats = perform_anova(
@@ -2083,25 +2083,36 @@ def main():
                     df, factor_cols, value_col, analyses_results)
 
                 st.download_button(
-                    label="📥 Download HTML Report",
+                    label="Download HTML Report",
                     data=html_report,
                     file_name=f"statistical_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html",
                     mime="text/html"
                 )
 
-                st.success("✅ Report generated successfully!")
+                st.success("Report generated successfully!")
 
                 st.markdown("### Preview")
                 st.components.v1.html(html_report, height=600, scrolling=True)
 
     # Footer
     st.sidebar.markdown("---")
-    st.sidebar.markdown("""
+    st.sidebar.markdown(
+        """
     <small>
     <b>Agricultural Experiment Analysis v2.1</b><br>
-    Statistical Analysis Tool
+    Developed by  
+    <a href="https://scholar.google.com/citations?user=Es-kJk4AAAAJ&hl=en" target="_blank">
+        Dr. Sandip Garai
+    </a>
+    &nbsp;·&nbsp;
+    <a href="https://scholar.google.com/citations?user=0dQ7Sf8AAAAJ&hl=en&oi=ao" target="_blank">
+        Dr. Kanaka K K
+    </a><br>
+    📧 <a href="mailto:drgaraislab@gmail.com">Contact</a>
     </small>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True
+    )
 
 
 if __name__ == "__main__":
