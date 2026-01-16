@@ -26,6 +26,7 @@ from plotly.subplots import make_subplots
 from scipy import stats
 from scipy.stats import shapiro, levene, kruskal, f_oneway, friedmanchisquare
 from scipy.stats import boxcox, skew, kurtosis, rankdata, norm, t as t_dist
+from scipy.stats import studentized_range
 from scipy.special import inv_boxcox
 from itertools import combinations
 from io import BytesIO, StringIO
@@ -1076,6 +1077,317 @@ def plot_bar_with_error(df, factor_col, value_col, letters=None):
     return fig
 
 
+def plot_interaction_grouped_bar(df, factor1, factor2, value_col, letters=None):
+    """Create grouped bar chart for interaction effects"""
+    summary = df.groupby([factor1, factor2])[value_col].agg(
+        ['mean', 'std', 'count']).reset_index()
+    summary['se'] = summary['std'] / np.sqrt(summary['count'])
+
+    # Create interaction label
+    summary['Interaction'] = summary[factor1].astype(
+        str) + ' × ' + summary[factor2].astype(str)
+
+    fig = go.Figure()
+
+    groups1 = sorted(df[factor1].unique())
+    groups2 = sorted(df[factor2].unique())
+    colors = COLOR_PALETTES['primary']
+
+    for i, g1 in enumerate(groups1):
+        g1_data = summary[summary[factor1] == g1].sort_values(factor2)
+        color = colors[i % len(colors)]
+
+        # Get letters for this group if available
+        letter_texts = []
+        if letters:
+            for _, row in g1_data.iterrows():
+                interaction_key = f"{row[factor1]} × {row[factor2]}"
+                letter_texts.append(letters.get(interaction_key, ''))
+
+        fig.add_trace(go.Bar(
+            name=str(g1),
+            x=g1_data[factor2].astype(str),
+            y=g1_data['mean'],
+            error_y=dict(
+                type='data',
+                array=g1_data['se'],
+                visible=True,
+                color='black',
+                thickness=1.5,
+                width=3,
+            ),
+            marker=dict(color=color, line=dict(color='black', width=1)),
+            text=letter_texts if letters else None,
+            textposition='outside',
+            textfont=dict(size=10, color='black', family='Arial'),
+            hovertemplate=(
+                f"<b>{factor1}: {g1}</b><br>"
+                f"{factor2}: %{{x}}<br>"
+                f"Mean: %{{y:.2f}} ± %{{error_y.array:.2f}}<br>"
+                "<extra></extra>"
+            )
+        ))
+
+    fig.update_layout(barmode='group')
+
+    fig = create_publication_layout(
+        fig,
+        title=f"Interaction: {factor1} × {factor2}",
+        xaxis_title=factor2,
+        yaxis_title=f"Mean {value_col} ± SE",
+        show_legend=True,
+        legend_position='right',
+        legend_title=factor1
+    )
+
+    # Adjust for text labels
+    if letters:
+        fig.update_layout(margin=dict(t=100))
+
+    return fig
+
+
+def plot_interaction_dot(df, factor1, factor2, value_col, letters=None, horizontal=False):
+    """Create dot plot for interaction effects - cleaner for many groups"""
+    summary = df.groupby([factor1, factor2])[value_col].agg(
+        ['mean', 'std', 'count']).reset_index()
+    summary['se'] = summary['std'] / np.sqrt(summary['count'])
+    summary['Interaction'] = summary[factor1].astype(
+        str) + ' × ' + summary[factor2].astype(str)
+
+    # Sort by mean for better visualization
+    summary = summary.sort_values('mean', ascending=True)
+
+    fig = go.Figure()
+
+    groups1 = sorted(df[factor1].unique())
+    colors = COLOR_PALETTES['primary']
+    color_map = {g: colors[i % len(colors)] for i, g in enumerate(groups1)}
+
+    for _, row in summary.iterrows():
+        color = color_map[row[factor1]]
+        letter = letters.get(row['Interaction'], '') if letters else ''
+
+        if horizontal:
+            fig.add_trace(go.Scatter(
+                x=[row['mean']],
+                y=[row['Interaction']],
+                mode='markers',
+                marker=dict(size=12, color=color, line=dict(
+                    width=1.5, color='black')),
+                error_x=dict(type='data', array=[row['se']], visible=True,
+                             color=color, thickness=2, width=6),
+                name=str(row[factor1]),
+                showlegend=False,
+                hovertemplate=(
+                    f"<b>{row['Interaction']}</b><br>"
+                    f"Mean: {row['mean']:.2f} ± {row['se']:.2f}<br>"
+                    "<extra></extra>"
+                )
+            ))
+            if letter:
+                fig.add_annotation(
+                    x=row['mean'] + row['se'] + (summary['mean'].max() * 0.03),
+                    y=row['Interaction'],
+                    text=f"<b>{letter}</b>",
+                    showarrow=False,
+                    font=dict(size=11, color='black'),
+                    xanchor='left'
+                )
+        else:
+            fig.add_trace(go.Scatter(
+                x=[row['Interaction']],
+                y=[row['mean']],
+                mode='markers',
+                marker=dict(size=12, color=color, line=dict(
+                    width=1.5, color='black')),
+                error_y=dict(type='data', array=[row['se']], visible=True,
+                             color=color, thickness=2, width=6),
+                name=str(row[factor1]),
+                showlegend=False,
+                hovertemplate=(
+                    f"<b>{row['Interaction']}</b><br>"
+                    f"Mean: {row['mean']:.2f} ± {row['se']:.2f}<br>"
+                    "<extra></extra>"
+                )
+            ))
+
+    # Add legend entries
+    for g1 in groups1:
+        fig.add_trace(go.Scatter(
+            x=[None], y=[None],
+            mode='markers',
+            marker=dict(size=12, color=color_map[g1]),
+            name=str(g1),
+            showlegend=True
+        ))
+
+    if horizontal:
+        fig = create_publication_layout(
+            fig,
+            title=f"Interaction: {factor1} × {factor2}",
+            xaxis_title=f"Mean {value_col} ± SE",
+            yaxis_title="",
+            show_legend=True,
+            legend_position='right',
+            legend_title=factor1,
+            height=max(400, 50 + len(summary) * 25)
+        )
+        fig.update_yaxes(tickfont=dict(size=10))
+    else:
+        fig = create_publication_layout(
+            fig,
+            title=f"Interaction: {factor1} × {factor2}",
+            xaxis_title="",
+            yaxis_title=f"Mean {value_col} ± SE",
+            show_legend=True,
+            legend_position='right',
+            legend_title=factor1
+        )
+        fig.update_xaxes(tickangle=-45, tickfont=dict(size=9))
+
+    return fig
+
+
+def plot_interaction_facet(df, factor1, factor2, value_col, letters=None):
+    """Create faceted bar chart - one subplot per level of factor1"""
+    groups1 = sorted(df[factor1].unique())
+    groups2 = sorted(df[factor2].unique())
+    n_cols = min(3, len(groups1))
+    n_rows = (len(groups1) + n_cols - 1) // n_cols
+
+    fig = make_subplots(
+        rows=n_rows, cols=n_cols,
+        subplot_titles=[str(g) for g in groups1],
+        vertical_spacing=0.12,
+        horizontal_spacing=0.08
+    )
+
+    colors = COLOR_PALETTES['primary']
+
+    for idx, g1 in enumerate(groups1):
+        row = idx // n_cols + 1
+        col = idx % n_cols + 1
+
+        g1_data = df[df[factor1] == g1].groupby(factor2)[value_col].agg(
+            ['mean', 'std', 'count']).reset_index()
+        g1_data['se'] = g1_data['std'] / np.sqrt(g1_data['count'])
+        g1_data = g1_data.sort_values(factor2)
+
+        # Get letters if available
+        letter_texts = []
+        if letters:
+            for _, row_data in g1_data.iterrows():
+                interaction_key = f"{g1} × {row_data[factor2]}"
+                letter_texts.append(letters.get(interaction_key, ''))
+
+        fig.add_trace(
+            go.Bar(
+                x=g1_data[factor2].astype(str),
+                y=g1_data['mean'],
+                error_y=dict(type='data', array=g1_data['se'], visible=True,
+                             color='black', thickness=1.5, width=3),
+                marker=dict(color=colors[idx % len(colors)],
+                            line=dict(color='black', width=1)),
+                text=letter_texts if letters else None,
+                textposition='outside',
+                textfont=dict(size=9),
+                showlegend=False,
+                hovertemplate=(
+                    f"<b>{factor1}: {g1}</b><br>"
+                    f"{factor2}: %{{x}}<br>"
+                    f"Mean: %{{y:.2f}}<br>"
+                    "<extra></extra>"
+                )
+            ),
+            row=row, col=col
+        )
+
+    fig.update_layout(
+        title=dict(
+            text=f"<b>Interaction: {factor1} × {factor2}</b>",
+            font=dict(size=THEME['title_size'],
+                      family=THEME['font_family'], color='black'),
+            x=0.5, xanchor='center'
+        ),
+        height=300 * n_rows,
+        paper_bgcolor='white',
+        plot_bgcolor='white',
+        font=dict(family=THEME['font_family'], color='black'),
+        margin=dict(t=80)
+    )
+
+    # Update all axes
+    fig.update_xaxes(tickangle=-45, tickfont=dict(size=10), linecolor='black',
+                     linewidth=1, mirror=True, gridcolor=THEME['grid_color'])
+    fig.update_yaxes(title_text=f"Mean {value_col}", tickfont=dict(size=10),
+                     linecolor='black', linewidth=1, mirror=True, gridcolor=THEME['grid_color'])
+
+    return fig
+
+
+def plot_interaction_heatmap_enhanced(df, factor1, factor2, value_col, letters=None):
+    """Enhanced heatmap with optional significance letters inside cells"""
+    pivot_table = df.pivot_table(
+        values=value_col, index=factor1, columns=factor2, aggfunc='mean')
+
+    if factor2 == 'Month':
+        available_months = [m for m in MONTH_ORDER if m in pivot_table.columns]
+        pivot_table = pivot_table[available_months]
+
+    # Create text annotations with letters
+    text_matrix = []
+    for i, row_name in enumerate(pivot_table.index):
+        row_text = []
+        for j, col_name in enumerate(pivot_table.columns):
+            val = pivot_table.iloc[i, j]
+            if letters:
+                interaction_key = f"{row_name} × {col_name}"
+                letter = letters.get(interaction_key, '')
+                row_text.append(f"{val:.1f}<br><b>{letter}</b>")
+            else:
+                row_text.append(f"{val:.1f}")
+        text_matrix.append(row_text)
+
+    fig = go.Figure(data=go.Heatmap(
+        z=pivot_table.values,
+        x=[str(c)[:3] if factor2 == 'Month' else str(c)
+           for c in pivot_table.columns],
+        y=pivot_table.index.astype(str),
+        colorscale='RdYlGn',
+        colorbar=dict(
+            title=dict(text=f'Mean {value_col}',
+                       font=dict(size=13, color='black')),
+            tickfont=dict(size=11, color='black'),
+            thickness=18,
+            len=0.9,
+        ),
+        text=text_matrix,
+        texttemplate="%{text}",
+        textfont=dict(size=10, color='black'),
+        hovertemplate=(
+            f"<b>{factor1}: %{{y}}</b><br>"
+            f"<b>{factor2}: %{{x}}</b><br>"
+            f"Mean: %{{z:.2f}}<br>"
+            "<extra></extra>"
+        ),
+        showscale=True,
+    ))
+
+    fig = create_publication_layout(
+        fig,
+        title=f"Interaction Heatmap: {factor1} × {factor2}" +
+        (" with CLD" if letters else ""),
+        xaxis_title=factor2,
+        yaxis_title=factor1,
+        show_legend=False
+    )
+
+    fig.update_xaxes(tickangle=0)
+
+    return fig
+
+
 def plot_interaction(df, factor1, factor2, value_col):
     """Create interaction plot"""
     summary = df.groupby([factor1, factor2])[value_col].agg(
@@ -1430,23 +1742,28 @@ def create_styled_table(df, title="", highlight_col=None, highlight_condition=No
                         format_dict=None, height=400):
     """Create a publication-quality styled table using Plotly"""
 
-    # Prepare data
+    # Prepare data with formatting
+    display_df = df.copy()
     if format_dict:
-        display_df = df.copy()
         for col, fmt in format_dict.items():
             if col in display_df.columns:
                 display_df[col] = display_df[col].apply(
-                    lambda x: fmt.format(x) if pd.notna(
-                        x) and isinstance(x, (int, float)) else x
+                    lambda x: fmt.format(x) if pd.notna(x) and isinstance(x, (int, float)) else (
+                        '-' if pd.isna(x) else str(x)
+                    )
                 )
-    else:
-        display_df = df.copy()
+
+    # Convert all columns to string for display
+    for col in display_df.columns:
+        display_df[col] = display_df[col].apply(
+            lambda x: '-' if pd.isna(x) else str(x))
 
     # Define colors
     header_color = '#1f77b4'
     row_even_color = '#f9f9f9'
     row_odd_color = 'white'
     highlight_color = '#d4edda'
+    sig_highlight_color = '#d4edda'
 
     # Create cell colors based on highlighting
     n_rows = len(display_df)
@@ -1459,18 +1776,28 @@ def create_styled_table(df, title="", highlight_col=None, highlight_condition=No
         for i in range(n_rows):
             base_color = row_even_color if i % 2 == 0 else row_odd_color
 
-            # Apply highlight if condition met
+            # Apply highlight if condition met for specific column
             if highlight_col and highlight_condition and col_name == highlight_col:
                 try:
                     val = df.iloc[i][highlight_col]
-                    if highlight_condition(val):
+                    if pd.notna(val) and highlight_condition(val):
                         base_color = highlight_color
                 except:
                     pass
-            # Also highlight entire row if Significant column exists and is True
+
+            # Highlight entire row if 'Significant' column is True
             if 'Significant' in df.columns:
                 try:
-                    if df.iloc[i]['Significant']:
+                    if df.iloc[i]['Significant'] == True:
+                        base_color = sig_highlight_color
+                except:
+                    pass
+
+            # Highlight row for Result column conditions
+            if 'Result' in df.columns and highlight_col == 'Result':
+                try:
+                    val = df.iloc[i]['Result']
+                    if highlight_condition and highlight_condition(val):
                         base_color = highlight_color
                 except:
                     pass
@@ -1484,14 +1811,16 @@ def create_styled_table(df, title="", highlight_col=None, highlight_condition=No
             fill_color=header_color,
             align='center',
             font=dict(color='white', size=13, family='Arial'),
-            height=35
+            height=40,
+            line=dict(color='white', width=1)
         ),
         cells=dict(
             values=[display_df[col].tolist() for col in display_df.columns],
             fill_color=cell_colors,
             align='center',
             font=dict(color='black', size=12, family='Arial'),
-            height=30
+            height=32,
+            line=dict(color='#e0e0e0', width=1)
         )
     )])
 
@@ -1500,7 +1829,8 @@ def create_styled_table(df, title="", highlight_col=None, highlight_condition=No
             text=f'<b>{title}</b>' if title else '',
             font=dict(size=16, family='Arial', color='black'),
             x=0.5,
-            xanchor='center'
+            xanchor='center',
+            y=0.98
         ),
         margin=dict(l=20, r=20, t=60 if title else 20, b=20),
         height=height,
@@ -1930,8 +2260,12 @@ def main():
                     f"{data.max():.3f}"
                 ]
             }
-            st.dataframe(pd.DataFrame(stats_data),
-                         use_container_width=True, hide_index=True)
+            fig_stats = create_styled_table(
+                pd.DataFrame(stats_data),
+                title=f"Response Variable: {value_col}",
+                height=450
+            )
+            st.plotly_chart(fig_stats, use_container_width=True)
 
         with tab2:
             st.subheader("Summary Statistics by Group")
@@ -1946,8 +2280,15 @@ def main():
                 summary = compute_extended_statistics(
                     df, [group_by], value_col)
 
-            st.dataframe(summary.style.format({col: '{:.3f}' for col in summary.select_dtypes(include=[np.number]).columns}),
-                         use_container_width=True, hide_index=True)
+            format_dict = {col: '{:.3f}' for col in summary.select_dtypes(
+                include=[np.number]).columns}
+            fig_summary = create_styled_table(
+                summary,
+                title="Summary Statistics by Group",
+                format_dict=format_dict,
+                height=min(200 + len(summary) * 35, 600)
+            )
+            st.plotly_chart(fig_summary, use_container_width=True)
 
             csv = summary.to_csv(index=False)
             st.download_button("Download Summary", csv,
@@ -1967,8 +2308,16 @@ def main():
                 if vals:
                     filtered_df = filtered_df[filtered_df[col].isin(vals)]
 
-            st.dataframe(filtered_df, use_container_width=True,
-                         hide_index=True)
+            if len(filtered_df) <= 100:
+                fig_raw = create_styled_table(
+                    filtered_df,
+                    title="Raw Data",
+                    height=min(200 + len(filtered_df) * 30, 600)
+                )
+                st.plotly_chart(fig_raw, use_container_width=True)
+            else:
+                st.dataframe(
+                    filtered_df, use_container_width=True, hide_index=True)
             st.caption(f"Showing {len(filtered_df)} of {len(df)} observations")
 
     # ========================================
@@ -2080,9 +2429,15 @@ def main():
                         return 'background-color: #f8d7da'
                     return ''
 
-                st.dataframe(results_df.style.applymap(highlight_result, subset=['Result']).format({
-                    'W-stat': '{:.4f}', 'p-value': '{:.4f}'
-                }), use_container_width=True, hide_index=True)
+                fig_normality = create_styled_table(
+                    results_df,
+                    title="Shapiro-Wilk Normality Test",
+                    format_dict={'W-stat': '{:.4f}', 'p-value': '{:.4f}'},
+                    highlight_col='Result',
+                    highlight_condition=lambda x: x == 'Normal',
+                    height=min(180 + len(results_df) * 35, 500)
+                )
+                st.plotly_chart(fig_normality, use_container_width=True)
 
                 normality_violated = any(
                     r['Result'] == 'Non-normal' for r in results if r['Group'] != 'Overall')
@@ -2100,9 +2455,15 @@ def main():
                         {'Factor': factor, 'Statistic': stat, 'p-value': p, 'Result': interp})
 
                 levene_df = pd.DataFrame(levene_results)
-                st.dataframe(levene_df.style.applymap(highlight_result, subset=['Result']).format({
-                    'Statistic': '{:.4f}', 'p-value': '{:.4f}'
-                }), use_container_width=True, hide_index=True)
+                fig_levene = create_styled_table(
+                    levene_df,
+                    title="Levene's Homogeneity Test",
+                    format_dict={'Statistic': '{:.4f}', 'p-value': '{:.4f}'},
+                    highlight_col='Result',
+                    highlight_condition=lambda x: x == 'Homogeneous',
+                    height=min(180 + len(levene_df) * 35, 400)
+                )
+                st.plotly_chart(fig_levene, use_container_width=True)
 
                 homogeneity_violated = any(
                     r['Result'] == 'Heterogeneous' for r in levene_results)
@@ -2202,10 +2563,16 @@ def main():
                     st.markdown("### ANOVA Table")
                     anova_df = pd.DataFrame(anova_table)
 
-                    st.dataframe(anova_df.style.format({
-                        'SS': '{:.4f}', 'df': '{:.0f}', 'MS': '{:.4f}',
-                        'F': '{:.4f}', 'p-value': '{:.6f}'
-                    }, na_rep='-'), use_container_width=True, hide_index=True)
+                    fig_anova = create_styled_table(
+                        anova_df,
+                        title="One-way ANOVA Table",
+                        format_dict={
+                            'SS': '{:.4f}', 'df': '{:.0f}', 'MS': '{:.4f}',
+                            'F': '{:.4f}', 'p-value': '{:.6f}'
+                        },
+                        height=220
+                    )
+                    st.plotly_chart(fig_anova, use_container_width=True)
 
                     # Additional statistics
                     st.markdown("### Additional Statistics")
@@ -2290,9 +2657,14 @@ def main():
                 if f_stat is not None:
                     st.markdown("### Welch's ANOVA Results")
                     welch_df = pd.DataFrame(welch_table)
-                    st.dataframe(welch_df.style.format({
-                        'df': '{:.2f}', 'F': '{:.4f}', 'p-value': '{:.6f}'
-                    }, na_rep='-'), use_container_width=True, hide_index=True)
+                    fig_welch = create_styled_table(
+                        welch_df,
+                        title="Welch's ANOVA Table",
+                        format_dict={'df': '{:.2f}',
+                                     'F': '{:.4f}', 'p-value': '{:.6f}'},
+                        height=180
+                    )
+                    st.plotly_chart(fig_welch, use_container_width=True)
 
                     col1, col2 = st.columns(2)
                     col1.metric("Welch's F", f"{f_stat:.4f}")
@@ -2316,9 +2688,14 @@ def main():
                         'Variance': list(add_stats['group_variances'].values()),
                         'n': list(add_stats['group_ns'].values())
                     })
-                    st.dataframe(group_stats_df.style.format({
-                        'Mean': '{:.4f}', 'Variance': '{:.4f}', 'n': '{:.0f}'
-                    }), use_container_width=True, hide_index=True)
+                    fig_group_stats = create_styled_table(
+                        group_stats_df,
+                        title="Group Statistics",
+                        format_dict={'Mean': '{:.4f}',
+                                     'Variance': '{:.4f}', 'n': '{:.0f}'},
+                        height=min(180 + len(group_stats_df) * 35, 400)
+                    )
+                    st.plotly_chart(fig_group_stats, use_container_width=True)
 
                     if p_value < 0.05:
                         st.success(
@@ -2408,9 +2785,18 @@ def main():
                                 return 'background-color: #d4edda; font-weight: bold'
                             return ''
 
-                        st.dataframe(display_table.style.applymap(highlight_sig_p, subset=['p-value']).format({
-                            'Sum Sq': '{:.3f}', 'df': '{:.0f}', 'F': '{:.3f}', 'p-value': '{:.6f}'
-                        }), use_container_width=True, hide_index=True)
+                        fig_twoway = create_styled_table(
+                            display_table,
+                            title="Two-way ANOVA Table",
+                            format_dict={
+                                'Sum Sq': '{:.3f}', 'df': '{:.0f}', 'F': '{:.3f}', 'p-value': '{:.6f}'
+                            },
+                            highlight_col='p-value',
+                            highlight_condition=lambda x: isinstance(
+                                x, (int, float)) and x < 0.05,
+                            height=250
+                        )
+                        st.plotly_chart(fig_twoway, use_container_width=True)
 
                         # Additional Statistics for Two-way ANOVA
                         st.markdown("### Additional Statistics")
@@ -2439,10 +2825,16 @@ def main():
                                 'Partial η²': sizes['partial_eta_squared']
                             })
                         effect_df = pd.DataFrame(effect_data)
-                        st.dataframe(effect_df.style.format({
-                            'η² (Eta-squared)': '{:.4f}',
-                            'Partial η²': '{:.4f}'
-                        }), use_container_width=True, hide_index=True)
+                        fig_effect = create_styled_table(
+                            effect_df,
+                            title="Effect Sizes by Factor",
+                            format_dict={
+                                'η² (Eta-squared)': '{:.4f}',
+                                'Partial η²': '{:.4f}'
+                            },
+                            height=min(180 + len(effect_df) * 35, 350)
+                        )
+                        st.plotly_chart(fig_effect, use_container_width=True)
 
                         st.markdown("### Interpretation")
                         significant_factors = []
@@ -2555,10 +2947,33 @@ def main():
 
                                             # Bar chart with significance letters
                                             st.markdown(
-                                                f"**Bar Chart: {source} with Significance Letters**")
+                                                f"**Visualization: {source}**")
+
                                             if result_key == 'Interaction':
-                                                fig_bar = plot_bar_with_error(
-                                                    plot_df, 'Interaction', working_value_col, letters)
+                                                # Offer multiple visualization options for interactions
+                                                viz_type = st.radio(
+                                                    f"Select visualization type for {source}:",
+                                                    ["Grouped Bar Chart", "Horizontal Dot Plot", "Vertical Dot Plot",
+                                                     "Faceted Bar Chart", "Heatmap with CLD"],
+                                                    horizontal=True,
+                                                    key=f"viz_{source}"
+                                                )
+
+                                                if viz_type == "Grouped Bar Chart":
+                                                    fig_bar = plot_interaction_grouped_bar(
+                                                        working_df, factor1, factor2, working_value_col, letters)
+                                                elif viz_type == "Horizontal Dot Plot":
+                                                    fig_bar = plot_interaction_dot(
+                                                        plot_df, factor1, factor2, working_value_col, letters, horizontal=True)
+                                                elif viz_type == "Vertical Dot Plot":
+                                                    fig_bar = plot_interaction_dot(
+                                                        plot_df, factor1, factor2, working_value_col, letters, horizontal=False)
+                                                elif viz_type == "Faceted Bar Chart":
+                                                    fig_bar = plot_interaction_facet(
+                                                        working_df, factor1, factor2, working_value_col, letters)
+                                                else:  # Heatmap with CLD
+                                                    fig_bar = plot_interaction_heatmap_enhanced(
+                                                        working_df, factor1, factor2, working_value_col, letters)
                                             else:
                                                 fig_bar = plot_bar_with_error(
                                                     plot_df, plot_factor, working_value_col, letters)
@@ -2607,11 +3022,20 @@ def main():
                             st.markdown(
                                 "**Pairwise p-values (Bonferroni corrected):**")
 
-                            # Create a styled heatmap-like table for Dunn's test
+                            # Create lower triangular heatmap for Dunn's test
+                            groups = list(dunn_result.columns)
+                            n = len(groups)
+
+                            # Create lower triangular mask
+                            z_values = dunn_result.values.astype(float).copy()
+                            mask = np.triu(np.ones_like(
+                                z_values, dtype=bool), k=0)
+                            z_lower = np.where(mask, np.nan, z_values)
+
                             fig_dunn = go.Figure(data=go.Heatmap(
-                                z=dunn_result.values.astype(float),
-                                x=dunn_result.columns.astype(str),
-                                y=dunn_result.index.astype(str),
+                                z=z_lower,
+                                x=[str(c) for c in groups],
+                                y=[str(c) for c in groups],
                                 colorscale=[[0, '#d62728'], [0.05, '#ff7f0e'], [
                                     0.1, '#ffbb78'], [1, '#2ca02c']],
                                 zmin=0, zmax=1,
@@ -2622,41 +3046,55 @@ def main():
                                     tickvals=[0, 0.01, 0.05, 0.1, 0.5, 1],
                                     ticktext=['0', '0.01', '0.05',
                                               '0.10', '0.50', '1.00'],
+                                    x=1.02,
                                 ),
                                 hovertemplate='%{y} vs %{x}<br>p-value: %{z:.4f}<extra></extra>',
                             ))
 
-                            # Add significance annotations
+                            # Add significance annotations (only lower triangle)
                             annotations = []
-                            for i, row_name in enumerate(dunn_result.index):
-                                for j, col_name in enumerate(dunn_result.columns):
-                                    val = dunn_result.iloc[i, j]
-                                    if i != j:
-                                        star = "***" if val < 0.001 else "**" if val < 0.01 else "*" if val < 0.05 else ""
+                            for i in range(n):
+                                for j in range(n):
+                                    if i > j:  # Only lower triangle
+                                        val = z_values[i, j]
+                                        star = "***" if val < 0.001 else "**" if val < 0.01 else "*" if val < 0.05 else "ns"
                                         text_color = 'white' if val < 0.05 else 'black'
                                         annotations.append(dict(
-                                            x=str(col_name), y=str(row_name), text=star,
+                                            x=str(groups[j]), y=str(groups[i]), text=star,
                                             showarrow=False,
                                             font=dict(
                                                 size=11, color=text_color, weight='bold'),
                                             xanchor='center', yanchor='middle'
                                         ))
 
+                            # Add legend annotation
+                            annotations.append(dict(
+                                x=1.18, y=0.5,
+                                xref='paper', yref='paper',
+                                text="<b>Significance:</b><br>*** p<0.001<br>** p<0.01<br>* p<0.05<br>ns: not sig.",
+                                showarrow=False,
+                                font=dict(size=10, color='black'),
+                                align='left',
+                                bgcolor='rgba(255,255,255,0.95)',
+                                bordercolor='black',
+                                borderwidth=1,
+                                borderpad=6
+                            ))
+
                             fig_dunn.update_layout(
                                 annotations=annotations,
-                                title=dict(text='<b>Dunn\'s Test Pairwise Comparisons</b>',
-                                           font=dict(size=16, color='black'), x=0.5),
-                                xaxis=dict(title='Group', tickfont=dict(
-                                    size=12, color='black')),
-                                yaxis=dict(title='Group', tickfont=dict(
-                                    size=12, color='black'), autorange='reversed'),
-                                height=450, width=550,
+                                title=dict(text="<b>Dunn's Test Pairwise Comparisons</b>",
+                                           font=dict(size=16, color='black', family='Arial'), x=0.5),
+                                xaxis=dict(title=dict(text='Group', font=dict(size=14, color='black')),
+                                           tickfont=dict(size=12, color='black'), linecolor='black', mirror=True),
+                                yaxis=dict(title=dict(text='Group', font=dict(size=14, color='black')),
+                                           tickfont=dict(size=12, color='black'), autorange='reversed',
+                                           linecolor='black', mirror=True),
+                                height=500,
+                                margin=dict(r=180),
                                 paper_bgcolor='white', plot_bgcolor='white'
                             )
                             st.plotly_chart(fig_dunn, use_container_width=True)
-
-                            st.caption(
-                                "Green = not significant, Red/Orange = significant (p < 0.05). Stars: *** p<0.001, ** p<0.01, * p<0.05")
 
                             st.markdown("### Recommended Visualization")
                             fig = plot_boxplot(
