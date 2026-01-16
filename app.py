@@ -177,7 +177,7 @@ def display_styled_table(df, title="", format_dict=None, highlight_col=None,
     csv = df.to_csv(index=False)
     download_key = key if key else f"download_{title.replace(' ', '_')}_{id(df)}"
     st.download_button(
-        label="📥 Download CSV",
+        label="Download CSV",
         data=csv,
         file_name=f"{title.replace(' ', '_').lower() if title else 'table'}.csv",
         mime="text/csv",
@@ -1934,7 +1934,7 @@ def display_styled_table(df, title="", format_dict=None, highlight_col=None,
     csv = df.to_csv(index=False)
     download_key = key or f"download_{title.replace(' ', '_')}_{id(df)}"
     st.download_button(
-        label="📥 Download CSV",
+        label="Download CSV",
         data=csv,
         file_name=f"{title.replace(' ', '_').lower() or 'table'}.csv",
         mime="text/csv",
@@ -1948,7 +1948,7 @@ def download_figure_as_svg(fig, filename, key):
     svg_bytes = fig.to_image(format="svg")
 
     st.download_button(
-        label="📥 Download SVG",
+        label="Download SVG",
         data=svg_bytes,
         file_name=f"{filename}.svg",
         mime="image/svg+xml",
@@ -3507,7 +3507,7 @@ def main():
     st.sidebar.markdown(
         """
     <small>
-    <b>📥 Download Options:</b><br>
+    <b>Download Options:</b><br>
     • Tables: Click "Download CSV" below each table<br>
     • Figures: Click camera icon (📷) in figure toolbar → SVG<br>
     </small>
